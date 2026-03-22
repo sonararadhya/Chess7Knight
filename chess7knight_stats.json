@@ -1,0 +1,29 @@
+{
+  "matches": [
+    {
+      "result": "abandoned",
+      "accuracy": 84.0,
+      "rating": 1212,
+      "level": 1,
+      "moves": 46
+    },
+    {
+      "result": "abandoned",
+      "accuracy": 81.9,
+      "rating": 1202,
+      "level": 11,
+      "moves": 35
+    },
+    {
+      "result": "abandoned",
+      "accuracy": 100.0,
+      "rating": 1200,
+      "level": 7,
+      "moves": 1
+    }
+  ],
+  "wins": 0,
+  "losses": 0,
+  "draws": 0,
+  "best_acc": 100.0
+}

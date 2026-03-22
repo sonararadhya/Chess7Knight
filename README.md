@@ -251,3 +251,15 @@ There were definitely challenges (and a lot of debugging 😅), but that’s wha
 If you're exploring the code, building something similar, or just playing the game — I hope it gives you the same satisfaction I had while creating it.
 
 — Aradhya Sonar
+
+
+## 📸 Screenshots
+
+### Main Menu
+![Main Menu](Screenshots/menu.png)
+
+### Gameplay
+![Gameplay](Screenshots/game.png)
+
+### Evaluation Bar
+![Evaluation](Screenshots/eval.png)

@@ -1,335 +1,343 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Chess } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 import axios from 'axios';
 import { useTheme } from '../contexts/ThemeContext';
+import { useLanguage } from '../contexts/LanguageContext';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const ChessGame = ({ user }) => {
   const { theme } = useTheme();
-  const [gameState, setGameState] = useState('menu'); // 'menu' or 'playing'
-  const [difficulty, setDifficulty] = useState('1200'); // ELO
-  const [game, setGame] = useState(new Chess());
+  const { t } = useLanguage();
+  const [gameState, setGameState] = useState('menu');
+  const [difficulty, setDifficulty] = useState('1200');
+
+  const gameRef = useRef(new Chess());
+  const [fen, setFen] = useState(gameRef.current.fen());
   const [history, setHistory] = useState([]);
-  const [status, setStatus] = useState('Your turn');
+  const [status, setStatus] = useState(t('your_turn'));
+  const [isThinking, setIsThinking] = useState(false);
   const [optionSquares, setOptionSquares] = useState({});
   const [moveSquares, setMoveSquares] = useState({});
   const [moveFrom, setMoveFrom] = useState(null);
+  const [boardWidth, setBoardWidth] = useState(480);
 
+  // Responsive board sizing
   useEffect(() => {
-    fetchHistory();
+    const updateSize = () => {
+      const w = Math.min(580, window.innerWidth - 40);
+      setBoardWidth(w);
+    };
+    updateSize();
+    window.addEventListener('resize', updateSize);
+    return () => window.removeEventListener('resize', updateSize);
   }, []);
+
+  useEffect(() => { fetchHistory(); }, []);
 
   const fetchHistory = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-      const res = await axios.get(`${API_URL}/matches/history`, {
-        headers: { 'x-auth-token': token }
-      });
+      const res = await axios.get(`${API_URL}/matches/history`, { headers: { 'x-auth-token': token } });
       setHistory(res.data);
-    } catch (err) {
-      console.error('Error fetching history', err);
-    }
+    } catch (err) { console.error('Error fetching history', err); }
   };
 
   const saveMatch = async (result) => {
     const token = localStorage.getItem('token');
     if (!token) return;
     try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
       await axios.post(`${API_URL}/matches/save`, {
-        pgn: game.pgn(),
-        result: result,
+        pgn: gameRef.current.pgn(), result,
         accuracy: Math.floor(Math.random() * 20) + 80,
         difficulty: parseInt(difficulty)
-      }, {
-        headers: { 'x-auth-token': token }
-      });
+      }, { headers: { 'x-auth-token': token } });
       fetchHistory();
-    } catch (err) {
-      console.error('Error saving match', err);
-    }
+    } catch (err) { console.error('Error saving match', err); }
   };
 
-  const makeBotMove = async () => {
-    if (game.isGameOver() || game.isDraw()) return;
+  const checkGameOver = useCallback((g) => {
+    if (g.isCheckmate()) {
+      const winner = g.turn() === 'w' ? 'Black' : 'White';
+      setStatus(`♚ ${t('checkmate')}! ${winner} wins!`);
+      saveMatch(g.turn() === 'w' ? '0-1' : '1-0');
+      return true;
+    }
+    if (g.isDraw()) {
+      setStatus(`½ ${t('draw')}!`);
+      saveMatch('1/2-1/2');
+      return true;
+    }
+    if (g.inCheck()) {
+      setStatus(`⚠️ ${t('check')}!`);
+      return false;
+    }
+    return false;
+  }, [difficulty, t]);
 
-    setStatus('Stockfish is thinking...');
+  const makeAMove = useCallback((move) => {
+    try {
+      const result = gameRef.current.move(move);
+      if (!result) return null;
+      setFen(gameRef.current.fen());
+      setMoveSquares({
+        [result.from]: { backgroundColor: 'rgba(201, 162, 39, 0.4)' },
+        [result.to]: { backgroundColor: 'rgba(201, 162, 39, 0.4)' },
+      });
+      setOptionSquares({});
+      setMoveFrom(null);
+      return result;
+    } catch { return null; }
+  }, []);
+
+  const fallbackRandomMove = useCallback(() => {
+    const moves = gameRef.current.moves({ verbose: true });
+    if (moves.length > 0) {
+      const rnd = moves[Math.floor(Math.random() * moves.length)];
+      makeAMove({ from: rnd.from, to: rnd.to, promotion: 'q' });
+    }
+  }, [makeAMove]);
+
+  const makeBotMove = useCallback(async () => {
+    if (gameRef.current.isGameOver()) return;
+    setIsThinking(true);
+    setStatus(`🤖 ${t('thinking')}`);
     try {
       const depth = difficulty === '2000' ? 12 : difficulty === '1200' ? 5 : 1;
-      // encodeURI for FEN string is crucial
-      const fen = encodeURIComponent(game.fen());
-      const res = await axios.get(`https://stockfish.online/api/s/v2.php?fen=${fen}&depth=${depth}`);
-      
-      const bestmoveStr = res.data.bestmove; // "bestmove e2e4 ponder d7d6"
-      if (bestmoveStr && bestmoveStr.includes('bestmove')) {
-        const movePart = bestmoveStr.split(' ')[1]; // "e2e4"
-        const from = movePart.substring(0, 2);
-        const to = movePart.substring(2, 4);
-        const promotion = movePart.length === 5 ? movePart[4] : undefined;
-
-        makeAMove({ from, to, promotion });
-      } else {
-        // Fallback random move if API fails
-        fallbackRandomMove();
-      }
+      const encodedFen = encodeURIComponent(gameRef.current.fen());
+      const res = await axios.get(`https://stockfish.online/api/s/v2.php?fen=${encodedFen}&depth=${depth}`);
+      const bestmoveStr = res.data?.bestmove ?? '';
+      if (bestmoveStr.includes('bestmove')) {
+        const movePart = bestmoveStr.split(' ')[1];
+        if (movePart && movePart !== '(none)') {
+          const from = movePart.substring(0, 2);
+          const to = movePart.substring(2, 4);
+          const promotion = movePart.length === 5 ? movePart[4] : undefined;
+          makeAMove({ from, to, promotion });
+        } else { fallbackRandomMove(); }
+      } else { fallbackRandomMove(); }
     } catch (err) {
       console.error('Stockfish API error:', err);
       fallbackRandomMove();
+    } finally {
+      setIsThinking(false);
+      const over = checkGameOver(gameRef.current);
+      if (!over) setStatus(t('your_turn'));
     }
-  };
-
-  const fallbackRandomMove = () => {
-    const possibleMoves = game.moves({ verbose: true });
-    if (possibleMoves.length > 0) {
-      const randomMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
-      makeAMove({ from: randomMove.from, to: randomMove.to, promotion: 'q' });
-    }
-  };
-
-  const makeAMove = (move) => {
-    try {
-      const gameCopy = new Chess(game.fen());
-      const result = gameCopy.move(move);
-      
-      setGame(gameCopy);
-      
-      // Update highlights for last move
-      setMoveSquares({
-        [move.from]: { backgroundColor: 'rgba(255, 255, 0, 0.4)' },
-        [move.to]: { backgroundColor: 'rgba(255, 255, 0, 0.4)' }
-      });
-      setOptionSquares({}); // clear dots
-      setMoveFrom(null); // Clear selected piece
-
-      if (gameCopy.isGameOver()) {
-        if (gameCopy.isCheckmate()) {
-          setStatus(`Checkmate! ${gameCopy.turn() === 'w' ? 'Black' : 'White'} wins!`);
-          saveMatch(gameCopy.turn() === 'w' ? '0-1' : '1-0');
-        } else {
-          setStatus('Draw!');
-          saveMatch('1/2-1/2');
-        }
-      } else {
-        setStatus('Your turn');
-      }
-      return result;
-    } catch (e) {
-      return null;
-    }
-  };
+  }, [difficulty, makeAMove, checkGameOver, fallbackRandomMove, t]);
 
   const getMoveOptions = (square) => {
-    const moves = game.moves({ square, verbose: true });
-    if (moves.length === 0) {
-      setOptionSquares({});
-      return false;
-    }
-
+    const moves = gameRef.current.moves({ square, verbose: true });
+    if (moves.length === 0) { setOptionSquares({}); return false; }
     const newSquares = {};
-    moves.map((move) => {
+    moves.forEach((move) => {
+      const isCapture = gameRef.current.get(move.to) && gameRef.current.get(move.to).color !== gameRef.current.get(square)?.color;
       newSquares[move.to] = {
-        background: game.get(move.to) && game.get(move.to).color !== game.get(square).color
-          ? 'radial-gradient(circle, rgba(0,0,0,.4) 85%, transparent 85%)' 
-          : 'radial-gradient(circle, rgba(0,0,0,.4) 25%, transparent 25%)',
-        borderRadius: '50%'
+        background: isCapture
+          ? 'radial-gradient(circle, rgba(248,113,113,.6) 65%, transparent 65%)'
+          : 'radial-gradient(circle, rgba(79,140,255,.5) 26%, transparent 26%)',
+        borderRadius: '50%',
       };
-      return move;
     });
-    newSquares[square] = { background: 'rgba(255, 255, 0, 0.4)' };
+    newSquares[square] = { backgroundColor: 'rgba(201, 162, 39, 0.5)' };
     setOptionSquares(newSquares);
     return true;
   };
 
+  // Click-to-move: select piece, show legal moves, click destination
   const onSquareClick = (square) => {
-    // If we have a selected piece
-    if (moveFrom) {
-      const move = makeAMove({
-        from: moveFrom,
-        to: square,
-        promotion: 'q'
-      });
+    if (isThinking) return;
+    if (gameRef.current.turn() !== 'w') return;
+    if (gameRef.current.isGameOver()) return;
 
-      // If illegal move (e.g. clicked another piece or empty square)
-      if (move === null) {
-        const hasMoves = getMoveOptions(square);
-        if (hasMoves) setMoveFrom(square);
-        else {
-          setMoveFrom(null);
-          setOptionSquares({});
-        }
+    if (moveFrom) {
+      const result = makeAMove({ from: moveFrom, to: square, promotion: 'q' });
+      if (result === null) {
+        const piece = gameRef.current.get(square);
+        if (piece && piece.color === 'w') {
+          const hasMoves = getMoveOptions(square);
+          if (hasMoves) setMoveFrom(square);
+          else { setMoveFrom(null); setOptionSquares({}); }
+        } else { setMoveFrom(null); setOptionSquares({}); }
         return;
       }
-
-      // Valid move made
-      setMoveFrom(null);
-      
-      const gameCopy = new Chess(game.fen());
-      gameCopy.move(move);
-      if (!gameCopy.isGameOver()) {
-        setTimeout(makeBotMove, 300);
-      }
+      const over = checkGameOver(gameRef.current);
+      if (!over) setTimeout(makeBotMove, 350);
       return;
     }
 
-    // First click on a piece
-    const piece = game.get(square);
-    if (piece && piece.color === game.turn()) {
+    const piece = gameRef.current.get(square);
+    if (piece && piece.color === 'w') {
       const hasMoves = getMoveOptions(square);
       if (hasMoves) setMoveFrom(square);
-    } else {
-      setOptionSquares({});
-    }
+    } else { setOptionSquares({}); }
   };
 
+  // Drag-and-drop
   const onDrop = (sourceSquare, targetSquare) => {
-    const move = makeAMove({
-      from: sourceSquare,
-      to: targetSquare,
-      promotion: 'q', // auto promote to queen
-    });
-
-    if (move === null) return false;
-
-    // Trigger bot
-    const gameCopy = new Chess(game.fen());
-    gameCopy.move(move); // apply move to fresh copy to check status
-    if (!gameCopy.isGameOver()) {
-        setTimeout(() => {
-          makeBotMove();
-        }, 300);
-    }
+    if (isThinking) return false;
+    if (gameRef.current.turn() !== 'w') return false;
+    if (gameRef.current.isGameOver()) return false;
+    const result = makeAMove({ from: sourceSquare, to: targetSquare, promotion: 'q' });
+    if (result === null) return false;
+    const over = checkGameOver(gameRef.current);
+    if (!over) setTimeout(makeBotMove, 350);
     return true;
   };
 
   const resetGame = () => {
-    setGame(new Chess());
-    setStatus('Your turn');
+    gameRef.current = new Chess();
+    setFen(gameRef.current.fen());
+    setStatus(t('your_turn'));
     setMoveSquares({});
     setOptionSquares({});
+    setMoveFrom(null);
+    setIsThinking(false);
   };
 
-  const startGame = (selectedDifficulty) => {
-    setDifficulty(selectedDifficulty);
-    resetGame();
-    setGameState('playing');
+  const startGame = (d) => { setDifficulty(d); resetGame(); setGameState('playing'); };
+
+  const handleUndo = () => {
+    if (isThinking) return;
+    gameRef.current.undo();
+    gameRef.current.undo();
+    setFen(gameRef.current.fen());
+    setMoveSquares({});
+    setOptionSquares({});
+    setStatus(t('your_turn'));
   };
 
+  // ── MENU ──
   if (gameState === 'menu') {
+    const levels = [
+      { elo: '400', label: t('beginner'), emoji: '🟢', color: 'var(--success)' },
+      { elo: '1200', label: t('intermediate'), emoji: '🟡', color: 'var(--warning)' },
+      { elo: '2000', label: t('advanced'), emoji: '🔴', color: 'var(--danger)' },
+    ];
     return (
-      <div className="game-container fade-in" style={{ gridTemplateColumns: '1fr', maxWidth: '600px', margin: '0 auto' }}>
-        <div className="glass-panel" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-          <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>♟️</div>
-          <h1 style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>Play against Stockfish</h1>
-          <p style={{ color: 'var(--text-secondary)', marginBottom: '3rem', fontSize: '1.1rem' }}>
-            {user ? `Select your opponent's ELO rating.` : `Playing as Guest. Your matches won't be saved.`}
+      <div className="fade-in" style={{ maxWidth: '560px', margin: '3rem auto' }}>
+        <div className="glass-panel" style={{ textAlign: 'center', padding: 'clamp(2rem, 4vw, 3.5rem) 2rem' }}>
+          <div style={{ fontSize: '4.5rem', marginBottom: '1rem', lineHeight: 1, animation: 'float 3s ease-in-out infinite' }}>♞</div>
+          <h1 style={{ marginBottom: '0.5rem' }}>{t('vs_stockfish')}</h1>
+          <p style={{ marginBottom: '2.5rem', fontSize: '1rem' }}>
+            {user ? `${t('welcome')}, ${user.email.split('@')[0]}! ${t('choose_challenge')}` : t('choose_challenge')}
           </p>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: '300px', margin: '0 auto' }}>
-            <button className="btn btn-secondary" onClick={() => startGame('400')} style={{ padding: '15px', fontSize: '1.1rem' }}>
-              🟢 Beginner (400)
-            </button>
-            <button className="btn" onClick={() => startGame('1200')} style={{ padding: '15px', fontSize: '1.1rem' }}>
-              🟡 Intermediate (1200)
-            </button>
-            <button className="btn btn-secondary" onClick={() => startGame('2000')} style={{ padding: '15px', fontSize: '1.1rem', borderColor: 'var(--danger-color)', color: 'var(--danger-color)' }}>
-              🔴 Advanced (2000)
-            </button>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '320px', margin: '0 auto' }}>
+            {levels.map(({ elo, label, emoji, color }) => (
+              <button
+                key={elo} className="btn btn-secondary" onClick={() => startGame(elo)}
+                style={{ padding: '14px 20px', fontSize: '1.05rem', justifyContent: 'space-between', borderColor: `${color}40` }}
+              >
+                <span>{emoji} {label}</span>
+                <span style={{ opacity: 0.5, fontSize: '0.85rem', fontFamily: 'var(--font-mono)' }}>ELO {elo}</span>
+              </button>
+            ))}
           </div>
         </div>
       </div>
     );
   }
 
-  // Parse moves for history table
-  const moveHistory = game.history();
+  // ── PLAYING ──
+  const moveHistory = gameRef.current.history();
   const pairedMoves = [];
   for (let i = 0; i < moveHistory.length; i += 2) {
-    pairedMoves.push({
-      white: moveHistory[i],
-      black: moveHistory[i + 1] || ''
-    });
+    pairedMoves.push({ white: moveHistory[i], black: moveHistory[i + 1] || '' });
   }
 
+  const statusClass = isThinking ? 'status-bar thinking'
+    : gameRef.current.inCheck() ? 'status-bar check'
+    : gameRef.current.isGameOver() ? 'status-bar success'
+    : 'status-bar';
+
   return (
-    <div className="game-container fade-in" style={{ gridTemplateColumns: '1fr 350px' }}>
-      
-      {/* LEFT COLUMN: BOARD */}
+    <div className="game-container fade-in">
       <div>
-        <div className="glass-panel" style={{ padding: '1rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ width: '40px', height: '40px', background: '#30363d', borderRadius: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem' }}>🤖</div>
-          <div>
-            <div style={{ fontWeight: 'bold' }}>Stockfish Engine</div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>ELO: {difficulty}</div>
+        {/* Bot info */}
+        <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ width: '36px', height: '36px', background: 'rgba(15,21,37,0.8)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0, border: '1px solid var(--border)' }}>🤖</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>Stockfish Engine</div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>ELO {difficulty}</div>
           </div>
+          {isThinking && <div className="spinner" />}
         </div>
 
+        {/* Board */}
         <div className="board-wrapper">
-          <Chessboard 
-            position={game.fen()} 
+          <Chessboard
+            id="game-board"
+            position={fen}
             onPieceDrop={onDrop}
             onSquareClick={onSquareClick}
-            animationDuration={300}
+            animationDuration={200}
+            boardWidth={boardWidth}
             customSquareStyles={{ ...moveSquares, ...optionSquares }}
-            customBoardStyle={{
-              borderRadius: '4px',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
-            }}
+            customBoardStyle={{ borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
             customDarkSquareStyle={{ backgroundColor: theme.darkSquare }}
             customLightSquareStyle={{ backgroundColor: theme.lightSquare }}
+            arePiecesDraggable={!isThinking && !gameRef.current.isGameOver()}
+            showBoardNotation={true}
           />
         </div>
 
-        <div className="glass-panel" style={{ padding: '1rem', marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <div style={{ width: '40px', height: '40px', background: 'var(--accent-color)', borderRadius: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.5rem', color: 'white' }}>👤</div>
-          <div>
-            <div style={{ fontWeight: 'bold' }}>{user ? user.email.split('@')[0] : 'Guest User'}</div>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{user ? `ELO: ${user.rating}` : 'Unrated'}</div>
+        {/* Player info */}
+        <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginTop: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ width: '36px', height: '36px', background: 'linear-gradient(135deg, var(--accent), var(--purple))', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>👤</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>{user ? user.email.split('@')[0] : 'Guest'}</div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{user ? `ELO ${user.rating}` : 'Unrated'}</div>
           </div>
         </div>
       </div>
-      
-      {/* RIGHT COLUMN: SIDEBAR */}
+
+      {/* Sidebar */}
       <div className="controls-panel">
-        <div className="glass-panel" style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', maxHeight: 'calc(100vh - 120px)' }}>
-          <div style={{ padding: '0.5rem', background: '#161b22', borderRadius: '6px', textAlign: 'center', fontWeight: 'bold', marginBottom: '1rem', border: '1px solid var(--border-color)' }}>
-            {status}
+        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 100px)' }}>
+          <div className={statusClass} style={{ marginBottom: '1rem' }}>{status}</div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)', marginBottom: '0.5rem' }}>
+            <span style={{ fontWeight: '600', fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('move_history')}</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{pairedMoves.length}</span>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border-color)', marginBottom: '0.5rem' }}>
-            <span style={{ fontWeight: 'bold' }}>Move History</span>
-          </div>
-          
-          <div style={{ flex: 1, overflowY: 'auto', marginBottom: '1rem', paddingRight: '5px' }} className="move-history">
+          <div className="move-history" style={{ flex: 1, overflowY: 'auto', marginBottom: '1rem' }}>
             {pairedMoves.length === 0 ? (
-              <p style={{ color: 'var(--text-secondary)', textAlign: 'center', marginTop: '2rem' }}>Make a move to start.</p>
+              <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '2rem', fontSize: '0.85rem' }}>{t('drag_or_click')}</p>
             ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.95rem' }}>
-                <tbody>
-                  {pairedMoves.map((pair, index) => (
-                    <tr key={index} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      <td style={{ padding: '8px 4px', color: 'var(--text-secondary)', width: '30px' }}>{index + 1}.</td>
-                      <td style={{ padding: '8px 4px', fontWeight: '500' }}>{pair.white}</td>
-                      <td style={{ padding: '8px 4px', fontWeight: '500' }}>{pair.black}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <table><tbody>
+                {pairedMoves.map((pair, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                    <td style={{ padding: '6px', color: 'var(--text-muted)', width: '28px', fontSize: '0.8rem' }}>{idx + 1}.</td>
+                    <td style={{ padding: '6px', fontWeight: '500', fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>{pair.white}</td>
+                    <td style={{ padding: '6px', fontWeight: '500', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>{pair.black}</td>
+                  </tr>
+                ))}
+              </tbody></table>
             )}
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', marginTop: 'auto' }}>
-            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => {
-              game.undo();
-              game.undo(); // Undo both bot and player move
-              setGame(new Chess(game.fen()));
-              setMoveSquares({});
-              setOptionSquares({});
-            }}>Undo</button>
-            <button className="btn" style={{ flex: 1 }} onClick={() => setGameState('menu')}>New Game</button>
+          <div style={{ display: 'flex', gap: '8px', marginTop: 'auto' }}>
+            <button className="btn btn-secondary" style={{ flex: 1, padding: '9px' }} onClick={handleUndo} disabled={isThinking || moveHistory.length < 2}>↩ {t('undo')}</button>
+            <button className="btn btn-gold" style={{ flex: 1, padding: '9px' }} onClick={() => setGameState('menu')}>⊕ {t('new_game')}</button>
           </div>
         </div>
+
+        {history.length > 0 && (
+          <div className="glass-panel" style={{ padding: '1rem' }}>
+            <div style={{ fontWeight: '600', fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.75rem' }}>{t('recent_matches')}</div>
+            {history.slice(0, 4).map((m, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>vs ELO {m.difficulty}</span>
+                <span className={`badge ${m.result === '1-0' ? 'badge-win' : m.result === '0-1' ? 'badge-loss' : 'badge-draw'}`}>
+                  {m.result === '1-0' ? '✓ Win' : m.result === '0-1' ? '✗ Loss' : '= Draw'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

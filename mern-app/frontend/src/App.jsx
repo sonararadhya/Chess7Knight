@@ -39,7 +39,7 @@ function App() {
       <div className="app">
         <nav className="navbar">
           <Link to="/" className="navbar-brand">
-            ♞ Chess7Knight Full-Stack
+            ♞ CHESS7KNIGHT
           </Link>
           <div className="nav-links">
             {isAuthenticated ? (
@@ -50,6 +50,7 @@ function App() {
               </>
             ) : (
               <>
+                <Link to="/" className="btn btn-secondary" style={{ marginRight: '10px' }}>Play as Guest</Link>
                 <Link to="/login" className="btn btn-secondary">Login</Link>
                 <Link to="/register" className="btn">Sign Up</Link>
               </>
@@ -61,7 +62,7 @@ function App() {
           <Routes>
             <Route 
               path="/" 
-              element={isAuthenticated ? <ChessGame user={user} /> : <Navigate to="/login" />} 
+              element={<ChessGame user={user} />} 
             />
             <Route 
               path="/login" 

@@ -31,7 +31,7 @@ const ChessGame = ({ user }) => {
   // Settings & Menu States
   const [gameState, setGameState] = useState('menu');
   const [selectedElo, setSelectedElo] = useState(1200);
-  const [selectedTime, setSelectedTime] = useState(TIME_CONTROLS[4]); // 5 min Blitz
+  const [selectedTime, setSelectedTime] = useState(TIME_CONTROLS[4]); // Default 5 min Blitz
 
   // Chess Engine States
   const gameRef = useRef(new Chess());
@@ -52,18 +52,91 @@ const ChessGame = ({ user }) => {
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [analysisData, setAnalysisData] = useState(null);
 
-  // Responsive board sizing
+  // ── 1. STATE PERSISTENCE (Restore Game Memory) ──
+  useEffect(() => {
+    const savedState = localStorage.getItem('chess7k_active_game_state');
+    if (savedState === 'playing') {
+      const savedFen = localStorage.getItem('chess7k_active_game_fen');
+      const savedPgn = localStorage.getItem('chess7k_active_game_pgn');
+      const savedEloVal = localStorage.getItem('chess7k_active_game_elo');
+      const savedTimeVal = localStorage.getItem('chess7k_active_game_time_limit');
+      const savedPlayerSec = localStorage.getItem('chess7k_active_game_player_time');
+      const savedBotSec = localStorage.getItem('chess7k_active_game_bot_time');
+      const savedStatusText = localStorage.getItem('chess7k_active_game_status');
+
+      if (savedFen) {
+        try {
+          const game = new Chess();
+          if (savedPgn) {
+            game.loadPgn(savedPgn);
+          } else {
+            game.load(savedFen);
+          }
+          gameRef.current = game;
+          setFen(game.fen());
+        } catch (e) {
+          console.error('Error reloading game state', e);
+          gameRef.current = new Chess();
+          setFen(gameRef.current.fen());
+        }
+      }
+
+      if (savedEloVal) setSelectedElo(parseInt(savedEloVal));
+      if (savedTimeVal) {
+        try {
+          setSelectedTime(JSON.parse(savedTimeVal));
+        } catch {}
+      }
+      if (savedPlayerSec) setPlayerTime(parseInt(savedPlayerSec));
+      if (savedBotSec) setBotTime(parseInt(savedBotSec));
+      if (savedStatusText) setStatus(savedStatusText);
+
+      setGameState('playing');
+    }
+  }, []);
+
+  // Save changes to localStorage on state updates
+  const saveStateToStorage = useCallback((customStatus) => {
+    if (gameState !== 'playing') return;
+    localStorage.setItem('chess7k_active_game_state', 'playing');
+    localStorage.setItem('chess7k_active_game_fen', gameRef.current.fen());
+    localStorage.setItem('chess7k_active_game_pgn', gameRef.current.pgn());
+    localStorage.setItem('chess7k_active_game_elo', String(selectedElo));
+    localStorage.setItem('chess7k_active_game_time_limit', JSON.stringify(selectedTime));
+    localStorage.setItem('chess7k_active_game_player_time', String(playerTime));
+    localStorage.setItem('chess7k_active_game_bot_time', String(botTime));
+    localStorage.setItem('chess7k_active_game_status', customStatus || status);
+  }, [gameState, selectedElo, selectedTime, playerTime, botTime, status]);
+
+  const clearStorageGame = () => {
+    localStorage.removeItem('chess7k_active_game_state');
+    localStorage.removeItem('chess7k_active_game_fen');
+    localStorage.removeItem('chess7k_active_game_pgn');
+    localStorage.removeItem('chess7k_active_game_elo');
+    localStorage.removeItem('chess7k_active_game_time_limit');
+    localStorage.removeItem('chess7k_active_game_player_time');
+    localStorage.removeItem('chess7k_active_game_bot_time');
+    localStorage.removeItem('chess7k_active_game_status');
+  };
+
+  // Sync state to local storage when changes happen
+  useEffect(() => {
+    if (gameState === 'playing') {
+      saveStateToStorage();
+    }
+  }, [fen, playerTime, botTime, gameState, saveStateToStorage]);
+
+  // Responsive board size listener
   useEffect(() => {
     const updateSize = () => {
-      const w = Math.min(540, window.innerWidth - 40);
-      setBoardWidth(w);
+      setBoardWidth(Math.min(540, window.innerWidth - 40));
     };
     updateSize();
     window.addEventListener('resize', updateSize);
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  // Timer tick effect
+  // Timer Tick Interval
   useEffect(() => {
     if (gameState !== 'playing' || selectedTime.value === 0 || isThinking) {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -73,20 +146,20 @@ const ChessGame = ({ user }) => {
     timerRef.current = setInterval(() => {
       const turn = gameRef.current.turn();
       if (turn === 'w') {
-        setPlayerTime((t) => {
-          if (t <= 1) {
-            handleTimeout('0-1'); // player lost on time
+        setPlayerTime((prev) => {
+          if (prev <= 1) {
+            handleTimeout('0-1');
             return 0;
           }
-          return t - 1;
+          return prev - 1;
         });
       } else {
-        setBotTime((t) => {
-          if (t <= 1) {
-            handleTimeout('1-0'); // bot lost on time
+        setBotTime((prev) => {
+          if (prev <= 1) {
+            handleTimeout('1-0');
             return 0;
           }
-          return t - 1;
+          return prev - 1;
         });
       }
     }, 1000);
@@ -99,7 +172,9 @@ const ChessGame = ({ user }) => {
   const handleTimeout = (result) => {
     if (timerRef.current) clearInterval(timerRef.current);
     const winner = result === '1-0' ? 'White' : 'Black';
-    setStatus(`⏱️ Timeout! ${winner} wins!`);
+    const statusText = `⏱️ Timeout! ${winner} wins!`;
+    setStatus(statusText);
+    clearStorageGame();
     saveMatch(result);
   };
 
@@ -114,7 +189,6 @@ const ChessGame = ({ user }) => {
     const token = localStorage.getItem('token');
     const accuracyValue = Math.floor(Math.random() * 20) + 75; // 75-95%
     
-    // Optimistic / simulated ELO rating updates locally
     const postBody = {
       pgn: gameRef.current.pgn(),
       result,
@@ -122,6 +196,8 @@ const ChessGame = ({ user }) => {
       difficulty: selectedElo,
       timeControl: selectedTime.label
     };
+
+    clearStorageGame();
 
     if (token) {
       try {
@@ -134,7 +210,7 @@ const ChessGame = ({ user }) => {
         console.error('Error saving match', err);
       }
     } else {
-      // Simulate response for guests
+      // Simulate analysis response for guest players
       const movesCount = gameRef.current.history().length;
       const simulatedMatch = {
         result,
@@ -165,6 +241,7 @@ const ChessGame = ({ user }) => {
   const checkGameOver = useCallback((g) => {
     if (g.isGameOver()) {
       if (timerRef.current) clearInterval(timerRef.current);
+      clearStorageGame();
       if (g.isCheckmate()) {
         const winner = g.turn() === 'w' ? 'Black' : 'White';
         setStatus(`♚ ${t('checkmate')}! ${winner} wins!`);
@@ -201,11 +278,11 @@ const ChessGame = ({ user }) => {
   const makeBotMove = useCallback(async () => {
     if (gameRef.current.isGameOver()) return;
     setIsThinking(true);
-    setStatus(`🤖 ${t('thinking')}`);
+    const thinkingStatus = `🤖 ${t('thinking')}`;
+    setStatus(thinkingStatus);
+    saveStateToStorage(thinkingStatus);
 
     try {
-      // Calculate Stockfish depth based on chosen ELO
-      // 100 ELO = depth 1, 2800 ELO = depth 18
       const depth = Math.max(1, Math.min(18, Math.round(selectedElo / 150)));
       const encodedFen = encodeURIComponent(gameRef.current.fen());
       const res = await axios.get(`https://stockfish.online/api/s/v2.php?fen=${encodedFen}&depth=${depth}`);
@@ -225,13 +302,13 @@ const ChessGame = ({ user }) => {
         fallbackRandomMove();
       }
     } catch (err) {
-      console.error('Stockfish API error:', err);
+      console.error('Bot engine error:', err);
       fallbackRandomMove();
     } finally {
       setIsThinking(false);
       checkGameOver(gameRef.current);
     }
-  }, [selectedElo, makeAMove, checkGameOver, t]);
+  }, [selectedElo, makeAMove, checkGameOver, t, saveStateToStorage]);
 
   const fallbackRandomMove = () => {
     const moves = gameRef.current.moves({ verbose: true });
@@ -241,58 +318,75 @@ const ChessGame = ({ user }) => {
     }
   };
 
+  // ── 2. FOCUS GLOW & TAP-TO-MOVE VALIDATION ──
   const getMoveOptions = (square) => {
     const moves = gameRef.current.moves({ square, verbose: true });
-    if (moves.length === 0) { setOptionSquares({}); return false; }
+    if (moves.length === 0) {
+      setOptionSquares({});
+      return false;
+    }
+    
     const newSquares = {};
+    
+    // Selected piece gets high intensity yellow glow focus outline
+    newSquares[square] = {
+      boxShadow: '0 0 0 5px var(--gold), 0 0 20px var(--gold)',
+      backgroundColor: 'rgba(201, 162, 39, 0.25)',
+      borderRadius: '8px',
+      zIndex: 10
+    };
+
     moves.forEach((move) => {
       const isCapture = gameRef.current.get(move.to) && gameRef.current.get(move.to).color !== gameRef.current.get(square)?.color;
+      
+      // Target squares get an attractive blue glow focus outline (or red for capture)
       newSquares[move.to] = {
-        background: isCapture
-          ? 'radial-gradient(circle, rgba(248,113,113,.6) 65%, transparent 65%)'
-          : 'radial-gradient(circle, rgba(79,140,255,.5) 26%, transparent 26%)',
-        borderRadius: '50%',
+        boxShadow: isCapture 
+          ? '0 0 0 5px var(--danger), 0 0 20px var(--danger)'
+          : '0 0 0 5px var(--accent), 0 0 20px var(--accent)',
+        backgroundColor: isCapture
+          ? 'rgba(248, 113, 113, 0.2)'
+          : 'rgba(79, 140, 255, 0.15)',
+        borderRadius: isCapture ? '8px' : '50%',
+        cursor: 'pointer',
+        zIndex: 10
       };
     });
-    newSquares[square] = { backgroundColor: 'rgba(201, 162, 39, 0.5)' };
+
     setOptionSquares(newSquares);
     return true;
   };
 
-  // Click-to-move / Tap-to-move implementation (pieces are NOT draggable)
   const onSquareClick = (square) => {
     if (isThinking || gameRef.current.isGameOver() || gameState !== 'playing') return;
     if (gameRef.current.turn() !== 'w') return;
 
-    if (moveFrom) {
-      // Try to execute move
+    // Check if target is a valid highlighted option square
+    if (moveFrom && optionSquares[square] && square !== moveFrom) {
       const result = makeAMove({ from: moveFrom, to: square, promotion: 'q' });
-      if (result === null) {
-        // Selection switch: if clicked another own piece, select it
-        const piece = gameRef.current.get(square);
-        if (piece && piece.color === 'w') {
-          const hasMoves = getMoveOptions(square);
-          if (hasMoves) setMoveFrom(square);
-          else { setMoveFrom(null); setOptionSquares({}); }
-        } else {
-          setMoveFrom(null);
-          setOptionSquares({});
+      if (result !== null) {
+        const over = checkGameOver(gameRef.current);
+        if (!over) {
+          setTimeout(makeBotMove, 400);
         }
         return;
       }
-      
-      const over = checkGameOver(gameRef.current);
-      if (!over) {
-        setTimeout(makeBotMove, 400);
-      }
-      return;
     }
 
-    // First click selection
+    // Otherwise, handle selection / re-selection of White's pieces
     const piece = gameRef.current.get(square);
     if (piece && piece.color === 'w') {
       const hasMoves = getMoveOptions(square);
-      if (hasMoves) setMoveFrom(square);
+      if (hasMoves) {
+        setMoveFrom(square);
+      } else {
+        setMoveFrom(null);
+        setOptionSquares({});
+      }
+    } else {
+      // Clear selection if clicking empty square or opponent's piece
+      setMoveFrom(null);
+      setOptionSquares({});
     }
   };
 
@@ -312,11 +406,22 @@ const ChessGame = ({ user }) => {
     
     setStatus(t('your_turn'));
     setGameState('playing');
+
+    // Save playing state to storage
+    localStorage.setItem('chess7k_active_game_state', 'playing');
+    localStorage.setItem('chess7k_active_game_fen', gameRef.current.fen());
+    localStorage.setItem('chess7k_active_game_pgn', gameRef.current.pgn());
+    localStorage.setItem('chess7k_active_game_elo', String(selectedElo));
+    localStorage.setItem('chess7k_active_game_time_limit', JSON.stringify(selectedTime));
+    localStorage.setItem('chess7k_active_game_player_time', String(selectedTime.value));
+    localStorage.setItem('chess7k_active_game_bot_time', String(selectedTime.value));
+    localStorage.setItem('chess7k_active_game_status', t('your_turn'));
   };
 
   const handleResign = () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    setStatus('🏳️ You resigned. Black wins.');
+    setStatus('🏳️ You resigned. Bot wins.');
+    clearStorageGame();
     saveMatch('0-1');
   };
 
@@ -328,7 +433,7 @@ const ChessGame = ({ user }) => {
           <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
             <div style={{ fontSize: '4rem', marginBottom: '0.5rem', animation: 'float 3s ease-in-out infinite' }}>♞</div>
             <h1>{t('vs_stockfish')}</h1>
-            <p>Challenge the world's strongest open-source engine</p>
+            <p>Challenge the smart chess bot with adjustable difficulties</p>
           </div>
 
           {/* ELO Levels scrollable selection */}
@@ -405,15 +510,13 @@ const ChessGame = ({ user }) => {
 
   return (
     <div className="game-container fade-in">
-      {/* Game board & profile labels */}
       <div>
         {/* Bot Panel */}
         <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <div style={{ width: '36px', height: '36px', background: 'rgba(15,21,37,0.8)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', border: '1px solid var(--border)' }}>🤖</div>
             <div>
-              <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>Stockfish Bot</div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>ELO {selectedElo}</div>
+              <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>Bot ELO {selectedElo}</div>
             </div>
             {isThinking && <div className="spinner" />}
           </div>
@@ -426,19 +529,19 @@ const ChessGame = ({ user }) => {
           )}
         </div>
 
-        {/* Board wrapper (Draggable disabled as requested for pure click-to-move) */}
+        {/* Board wrapper (pure click/tap-to-move only, draggable=false) */}
         <div className="board-wrapper">
           <Chessboard
             id="game-board"
             position={fen}
             onSquareClick={onSquareClick}
-            animationDuration={180}
+            animationDuration={220}
             boardWidth={boardWidth}
             customSquareStyles={{ ...moveSquares, ...optionSquares }}
             customBoardStyle={{ borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
             customDarkSquareStyle={{ backgroundColor: theme.darkSquare }}
             customLightSquareStyle={{ backgroundColor: theme.lightSquare }}
-            arePiecesDraggable={false} // Force click-to-move only
+            arePiecesDraggable={false}
             showBoardNotation={true}
           />
         </div>
@@ -490,7 +593,7 @@ const ChessGame = ({ user }) => {
 
           <div style={{ display: 'flex', gap: '8px', marginTop: 'auto' }}>
             <button className="btn btn-secondary" style={{ flex: 1 }} onClick={handleResign} disabled={isThinking || gameRef.current.isGameOver()}>🏳️ Resign</button>
-            <button className="btn btn-gold" style={{ flex: 1 }} onClick={() => setGameState('menu')}>⊕ Quit</button>
+            <button className="btn btn-gold" style={{ flex: 1 }} onClick={() => { clearStorageGame(); setGameState('menu'); }}>⊕ Quit</button>
           </div>
         </div>
       </div>
@@ -534,7 +637,7 @@ const ChessGame = ({ user }) => {
                   <div key={key} style={{ padding: '8px 4px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: '6px', textAlign: 'center' }}>
                     <div style={{ fontSize: '1.1rem' }} title={label}>{emoji}</div>
                     <div style={{ fontSize: '0.9rem', fontWeight: '700', color, fontFamily: 'var(--font-mono)' }}>{val}</div>
-                    <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', overflow: 'hidden', textBreak: 'break-all', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
+                    <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
                   </div>
                 );
               })}

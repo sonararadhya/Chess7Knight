@@ -12,7 +12,7 @@ const UserSchema = new mongoose.Schema({
   },
   rating: {
     type: Number,
-    default: 1200
+    default: 0
   },
   createdAt: {
     type: Date,

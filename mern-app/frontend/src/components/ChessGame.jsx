@@ -7,15 +7,35 @@ import { useLanguage } from '../contexts/LanguageContext';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
+const ELO_LEVELS = Array.from({ length: 28 }, (_, i) => (i + 1) * 100);
+
+const TIME_CONTROLS = [
+  { label: 'Bullet 1m', value: 60, group: 'Bullet' },
+  { label: 'Bullet 2m', value: 120, group: 'Bullet' },
+  { label: 'Bullet 3m', value: 180, group: 'Bullet' },
+  { label: 'Blitz 4m', value: 240, group: 'Blitz' },
+  { label: 'Blitz 5m', value: 300, group: 'Blitz' },
+  { label: 'Blitz 6m', value: 360, group: 'Blitz' },
+  { label: 'Rapid 10m', value: 600, group: 'Rapid' },
+  { label: 'Rapid 15m', value: 900, group: 'Rapid' },
+  { label: 'Rapid 20m', value: 1200, group: 'Rapid' },
+  { label: 'Long 30m', value: 1800, group: 'Long' },
+  { label: 'Long 60m', value: 3600, group: 'Long' },
+  { label: 'No Limit', value: 0, group: 'Long' },
+];
+
 const ChessGame = ({ user }) => {
   const { theme } = useTheme();
   const { t } = useLanguage();
-  const [gameState, setGameState] = useState('menu');
-  const [difficulty, setDifficulty] = useState('1200');
 
+  // Settings & Menu States
+  const [gameState, setGameState] = useState('menu');
+  const [selectedElo, setSelectedElo] = useState(1200);
+  const [selectedTime, setSelectedTime] = useState(TIME_CONTROLS[4]); // 5 min Blitz
+
+  // Chess Engine States
   const gameRef = useRef(new Chess());
   const [fen, setFen] = useState(gameRef.current.fen());
-  const [history, setHistory] = useState([]);
   const [status, setStatus] = useState(t('your_turn'));
   const [isThinking, setIsThinking] = useState(false);
   const [optionSquares, setOptionSquares] = useState({});
@@ -23,10 +43,19 @@ const ChessGame = ({ user }) => {
   const [moveFrom, setMoveFrom] = useState(null);
   const [boardWidth, setBoardWidth] = useState(480);
 
+  // Timer States
+  const [playerTime, setPlayerTime] = useState(0);
+  const [botTime, setBotTime] = useState(0);
+  const timerRef = useRef(null);
+
+  // Analysis / Game Over States
+  const [showAnalysis, setShowAnalysis] = useState(false);
+  const [analysisData, setAnalysisData] = useState(null);
+
   // Responsive board sizing
   useEffect(() => {
     const updateSize = () => {
-      const w = Math.min(580, window.innerWidth - 40);
+      const w = Math.min(540, window.innerWidth - 40);
       setBoardWidth(w);
     };
     updateSize();
@@ -34,48 +63,125 @@ const ChessGame = ({ user }) => {
     return () => window.removeEventListener('resize', updateSize);
   }, []);
 
-  useEffect(() => { fetchHistory(); }, []);
+  // Timer tick effect
+  useEffect(() => {
+    if (gameState !== 'playing' || selectedTime.value === 0 || isThinking) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
+    }
 
-  const fetchHistory = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
-    try {
-      const res = await axios.get(`${API_URL}/matches/history`, { headers: { 'x-auth-token': token } });
-      setHistory(res.data);
-    } catch (err) { console.error('Error fetching history', err); }
+    timerRef.current = setInterval(() => {
+      const turn = gameRef.current.turn();
+      if (turn === 'w') {
+        setPlayerTime((t) => {
+          if (t <= 1) {
+            handleTimeout('0-1'); // player lost on time
+            return 0;
+          }
+          return t - 1;
+        });
+      } else {
+        setBotTime((t) => {
+          if (t <= 1) {
+            handleTimeout('1-0'); // bot lost on time
+            return 0;
+          }
+          return t - 1;
+        });
+      }
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [gameState, selectedTime, isThinking]);
+
+  const handleTimeout = (result) => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    const winner = result === '1-0' ? 'White' : 'Black';
+    setStatus(`⏱️ Timeout! ${winner} wins!`);
+    saveMatch(result);
+  };
+
+  const formatTime = (seconds) => {
+    if (seconds === 0 && selectedTime.value === 0) return '∞';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
   const saveMatch = async (result) => {
     const token = localStorage.getItem('token');
-    if (!token) return;
-    try {
-      await axios.post(`${API_URL}/matches/save`, {
-        pgn: gameRef.current.pgn(), result,
-        accuracy: Math.floor(Math.random() * 20) + 80,
-        difficulty: parseInt(difficulty)
-      }, { headers: { 'x-auth-token': token } });
-      fetchHistory();
-    } catch (err) { console.error('Error saving match', err); }
+    const accuracyValue = Math.floor(Math.random() * 20) + 75; // 75-95%
+    
+    // Optimistic / simulated ELO rating updates locally
+    const postBody = {
+      pgn: gameRef.current.pgn(),
+      result,
+      accuracy: accuracyValue,
+      difficulty: selectedElo,
+      timeControl: selectedTime.label
+    };
+
+    if (token) {
+      try {
+        const res = await axios.post(`${API_URL}/matches/save`, postBody, {
+          headers: { 'x-auth-token': token }
+        });
+        setAnalysisData(res.data.match);
+        setShowAnalysis(true);
+      } catch (err) {
+        console.error('Error saving match', err);
+      }
+    } else {
+      // Simulate response for guests
+      const movesCount = gameRef.current.history().length;
+      const simulatedMatch = {
+        result,
+        accuracy: accuracyValue,
+        difficulty: selectedElo,
+        timeControl: selectedTime.label,
+        performanceRating: Math.floor(selectedElo * (accuracyValue / 100)) + (result === '1-0' ? 150 : -150),
+        openingName: 'Italian Game',
+        phasePerformance: { opening: 90, middlegame: 80, endgame: movesCount > 20 ? 85 : 0 },
+        analysis: {
+          brilliant: Math.random() > 0.8 ? 1 : 0,
+          great: Math.floor(Math.random() * 2),
+          best: Math.floor(movesCount * 0.4),
+          excellent: Math.floor(movesCount * 0.2),
+          good: Math.floor(movesCount * 0.1),
+          book: 4,
+          inaccuracy: Math.floor(movesCount * 0.1),
+          mistake: Math.floor(movesCount * 0.05),
+          miss: Math.random() > 0.8 ? 1 : 0,
+          blunder: result === '0-1' ? 1 : 0
+        }
+      };
+      setAnalysisData(simulatedMatch);
+      setShowAnalysis(true);
+    }
   };
 
   const checkGameOver = useCallback((g) => {
-    if (g.isCheckmate()) {
-      const winner = g.turn() === 'w' ? 'Black' : 'White';
-      setStatus(`♚ ${t('checkmate')}! ${winner} wins!`);
-      saveMatch(g.turn() === 'w' ? '0-1' : '1-0');
-      return true;
-    }
-    if (g.isDraw()) {
-      setStatus(`½ ${t('draw')}!`);
-      saveMatch('1/2-1/2');
+    if (g.isGameOver()) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (g.isCheckmate()) {
+        const winner = g.turn() === 'w' ? 'Black' : 'White';
+        setStatus(`♚ ${t('checkmate')}! ${winner} wins!`);
+        saveMatch(g.turn() === 'w' ? '0-1' : '1-0');
+      } else if (g.isDraw()) {
+        setStatus(`½ ${t('draw')}!`);
+        saveMatch('1/2-1/2');
+      }
       return true;
     }
     if (g.inCheck()) {
       setStatus(`⚠️ ${t('check')}!`);
-      return false;
+    } else {
+      setStatus(t('your_turn'));
     }
     return false;
-  }, [difficulty, t]);
+  }, [selectedElo, selectedTime, t]);
 
   const makeAMove = useCallback((move) => {
     try {
@@ -92,22 +198,18 @@ const ChessGame = ({ user }) => {
     } catch { return null; }
   }, []);
 
-  const fallbackRandomMove = useCallback(() => {
-    const moves = gameRef.current.moves({ verbose: true });
-    if (moves.length > 0) {
-      const rnd = moves[Math.floor(Math.random() * moves.length)];
-      makeAMove({ from: rnd.from, to: rnd.to, promotion: 'q' });
-    }
-  }, [makeAMove]);
-
   const makeBotMove = useCallback(async () => {
     if (gameRef.current.isGameOver()) return;
     setIsThinking(true);
     setStatus(`🤖 ${t('thinking')}`);
+
     try {
-      const depth = difficulty === '2000' ? 12 : difficulty === '1200' ? 5 : 1;
+      // Calculate Stockfish depth based on chosen ELO
+      // 100 ELO = depth 1, 2800 ELO = depth 18
+      const depth = Math.max(1, Math.min(18, Math.round(selectedElo / 150)));
       const encodedFen = encodeURIComponent(gameRef.current.fen());
       const res = await axios.get(`https://stockfish.online/api/s/v2.php?fen=${encodedFen}&depth=${depth}`);
+      
       const bestmoveStr = res.data?.bestmove ?? '';
       if (bestmoveStr.includes('bestmove')) {
         const movePart = bestmoveStr.split(' ')[1];
@@ -116,17 +218,28 @@ const ChessGame = ({ user }) => {
           const to = movePart.substring(2, 4);
           const promotion = movePart.length === 5 ? movePart[4] : undefined;
           makeAMove({ from, to, promotion });
-        } else { fallbackRandomMove(); }
-      } else { fallbackRandomMove(); }
+        } else {
+          fallbackRandomMove();
+        }
+      } else {
+        fallbackRandomMove();
+      }
     } catch (err) {
       console.error('Stockfish API error:', err);
       fallbackRandomMove();
     } finally {
       setIsThinking(false);
-      const over = checkGameOver(gameRef.current);
-      if (!over) setStatus(t('your_turn'));
+      checkGameOver(gameRef.current);
     }
-  }, [difficulty, makeAMove, checkGameOver, fallbackRandomMove, t]);
+  }, [selectedElo, makeAMove, checkGameOver, t]);
+
+  const fallbackRandomMove = () => {
+    const moves = gameRef.current.moves({ verbose: true });
+    if (moves.length > 0) {
+      const rnd = moves[Math.floor(Math.random() * moves.length)];
+      makeAMove({ from: rnd.from, to: rnd.to, promotion: 'q' });
+    }
+  };
 
   const getMoveOptions = (square) => {
     const moves = gameRef.current.moves({ square, verbose: true });
@@ -146,166 +259,222 @@ const ChessGame = ({ user }) => {
     return true;
   };
 
-  // Click-to-move: select piece, show legal moves, click destination
+  // Click-to-move / Tap-to-move implementation (pieces are NOT draggable)
   const onSquareClick = (square) => {
-    if (isThinking) return;
+    if (isThinking || gameRef.current.isGameOver() || gameState !== 'playing') return;
     if (gameRef.current.turn() !== 'w') return;
-    if (gameRef.current.isGameOver()) return;
 
     if (moveFrom) {
+      // Try to execute move
       const result = makeAMove({ from: moveFrom, to: square, promotion: 'q' });
       if (result === null) {
+        // Selection switch: if clicked another own piece, select it
         const piece = gameRef.current.get(square);
         if (piece && piece.color === 'w') {
           const hasMoves = getMoveOptions(square);
           if (hasMoves) setMoveFrom(square);
           else { setMoveFrom(null); setOptionSquares({}); }
-        } else { setMoveFrom(null); setOptionSquares({}); }
+        } else {
+          setMoveFrom(null);
+          setOptionSquares({});
+        }
         return;
       }
+      
       const over = checkGameOver(gameRef.current);
-      if (!over) setTimeout(makeBotMove, 350);
+      if (!over) {
+        setTimeout(makeBotMove, 400);
+      }
       return;
     }
 
+    // First click selection
     const piece = gameRef.current.get(square);
     if (piece && piece.color === 'w') {
       const hasMoves = getMoveOptions(square);
       if (hasMoves) setMoveFrom(square);
-    } else { setOptionSquares({}); }
-  };
-
-  // Drag-and-drop
-  const onDrop = (sourceSquare, targetSquare) => {
-    if (isThinking) return false;
-    if (gameRef.current.turn() !== 'w') return false;
-    if (gameRef.current.isGameOver()) return false;
-    const result = makeAMove({ from: sourceSquare, to: targetSquare, promotion: 'q' });
-    if (result === null) return false;
-    const over = checkGameOver(gameRef.current);
-    if (!over) setTimeout(makeBotMove, 350);
-    return true;
+    }
   };
 
   const resetGame = () => {
     gameRef.current = new Chess();
     setFen(gameRef.current.fen());
-    setStatus(t('your_turn'));
     setMoveSquares({});
     setOptionSquares({});
     setMoveFrom(null);
     setIsThinking(false);
-  };
-
-  const startGame = (d) => { setDifficulty(d); resetGame(); setGameState('playing'); };
-
-  const handleUndo = () => {
-    if (isThinking) return;
-    gameRef.current.undo();
-    gameRef.current.undo();
-    setFen(gameRef.current.fen());
-    setMoveSquares({});
-    setOptionSquares({});
+    setShowAnalysis(false);
+    setAnalysisData(null);
+    
+    // Set Timers
+    setPlayerTime(selectedTime.value);
+    setBotTime(selectedTime.value);
+    
     setStatus(t('your_turn'));
+    setGameState('playing');
   };
 
-  // ── MENU ──
+  const handleResign = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    setStatus('🏳️ You resigned. Black wins.');
+    saveMatch('0-1');
+  };
+
+  // ── MENU VIEW ──
   if (gameState === 'menu') {
-    const levels = [
-      { elo: '400', label: t('beginner'), emoji: '🟢', color: 'var(--success)' },
-      { elo: '1200', label: t('intermediate'), emoji: '🟡', color: 'var(--warning)' },
-      { elo: '2000', label: t('advanced'), emoji: '🔴', color: 'var(--danger)' },
-    ];
     return (
-      <div className="fade-in" style={{ maxWidth: '560px', margin: '3rem auto' }}>
-        <div className="glass-panel" style={{ textAlign: 'center', padding: 'clamp(2rem, 4vw, 3.5rem) 2rem' }}>
-          <div style={{ fontSize: '4.5rem', marginBottom: '1rem', lineHeight: 1, animation: 'float 3s ease-in-out infinite' }}>♞</div>
-          <h1 style={{ marginBottom: '0.5rem' }}>{t('vs_stockfish')}</h1>
-          <p style={{ marginBottom: '2.5rem', fontSize: '1rem' }}>
-            {user ? `${t('welcome')}, ${user.email.split('@')[0]}! ${t('choose_challenge')}` : t('choose_challenge')}
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '320px', margin: '0 auto' }}>
-            {levels.map(({ elo, label, emoji, color }) => (
-              <button
-                key={elo} className="btn btn-secondary" onClick={() => startGame(elo)}
-                style={{ padding: '14px 20px', fontSize: '1.05rem', justifyContent: 'space-between', borderColor: `${color}40` }}
-              >
-                <span>{emoji} {label}</span>
-                <span style={{ opacity: 0.5, fontSize: '0.85rem', fontFamily: 'var(--font-mono)' }}>ELO {elo}</span>
-              </button>
-            ))}
+      <div className="fade-in" style={{ maxWidth: '640px', margin: '2rem auto' }}>
+        <div className="glass-panel" style={{ padding: '2rem' }}>
+          <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
+            <div style={{ fontSize: '4rem', marginBottom: '0.5rem', animation: 'float 3s ease-in-out infinite' }}>♞</div>
+            <h1>{t('vs_stockfish')}</h1>
+            <p>Challenge the world's strongest open-source engine</p>
           </div>
+
+          {/* ELO Levels scrollable selection */}
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', fontWeight: '600' }}>
+              Select Opponent ELO ({selectedElo})
+            </label>
+            <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '4px 2px', scrollbarWidth: 'thin' }}>
+              {ELO_LEVELS.map((elo) => {
+                const isSelected = selectedElo === elo;
+                return (
+                  <button
+                    key={elo}
+                    onClick={() => setSelectedElo(elo)}
+                    className={`btn btn-sm ${isSelected ? '' : 'btn-secondary'}`}
+                    style={{ flexShrink: 0, padding: '8px 14px', border: isSelected ? '1px solid var(--gold)' : undefined }}
+                  >
+                    {elo}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Time Controls selection */}
+          <div style={{ marginBottom: '2rem' }}>
+            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', fontWeight: '600' }}>
+              Time Control
+            </label>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+              {TIME_CONTROLS.map((tc) => {
+                const isSelected = selectedTime.label === tc.label;
+                return (
+                  <button
+                    key={tc.label}
+                    onClick={() => setSelectedTime(tc)}
+                    className={`btn btn-sm ${isSelected ? '' : 'btn-secondary'}`}
+                    style={{ padding: '8px', border: isSelected ? '1px solid var(--gold)' : undefined }}
+                  >
+                    {tc.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <button className="btn btn-gold btn-lg" style={{ width: '100%' }} onClick={resetGame}>
+            ⚔️ Play Match
+          </button>
         </div>
       </div>
     );
   }
 
-  // ── PLAYING ──
+  // ── GAME PLAYING VIEW ──
   const moveHistory = gameRef.current.history();
   const pairedMoves = [];
   for (let i = 0; i < moveHistory.length; i += 2) {
     pairedMoves.push({ white: moveHistory[i], black: moveHistory[i + 1] || '' });
   }
 
-  const statusClass = isThinking ? 'status-bar thinking'
-    : gameRef.current.inCheck() ? 'status-bar check'
-    : gameRef.current.isGameOver() ? 'status-bar success'
-    : 'status-bar';
+  const moveCategories = [
+    { key: 'brilliant', label: 'Brilliant', emoji: '💎', color: '#9b6dff' },
+    { key: 'great', label: 'Great Move', emoji: '⭐', color: '#4f8cff' },
+    { key: 'best', label: 'Best Move', emoji: '🟢', color: '#34d399' },
+    { key: 'excellent', label: 'Excellent', emoji: '✅', color: '#10b981' },
+    { key: 'good', label: 'Good', emoji: '👍', color: '#6b7280' },
+    { key: 'book', label: 'Book Move', emoji: '📖', color: '#c9a227' },
+    { key: 'inaccuracy', label: 'Inaccuracy', emoji: '❓', color: '#fbbf24' },
+    { key: 'mistake', label: 'Mistake', emoji: '⚠️', color: '#f59e0b' },
+    { key: 'miss', label: 'Missed Win', emoji: '❌', color: '#f97316' },
+    { key: 'blunder', label: 'Blunder', emoji: '🔴', color: '#f87171' }
+  ];
 
   return (
     <div className="game-container fade-in">
+      {/* Game board & profile labels */}
       <div>
-        {/* Bot info */}
-        <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{ width: '36px', height: '36px', background: 'rgba(15,21,37,0.8)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0, border: '1px solid var(--border)' }}>🤖</div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>Stockfish Engine</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>ELO {difficulty}</div>
+        {/* Bot Panel */}
+        <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ width: '36px', height: '36px', background: 'rgba(15,21,37,0.8)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', border: '1px solid var(--border)' }}>🤖</div>
+            <div>
+              <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>Stockfish Bot</div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>ELO {selectedElo}</div>
+            </div>
+            {isThinking && <div className="spinner" />}
           </div>
-          {isThinking && <div className="spinner" />}
+          
+          {/* Bot Timer */}
+          {selectedTime.value > 0 && (
+            <div style={{ fontSize: '1.25rem', fontWeight: '700', fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.05)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+              ⏱️ {formatTime(botTime)}
+            </div>
+          )}
         </div>
 
-        {/* Board */}
+        {/* Board wrapper (Draggable disabled as requested for pure click-to-move) */}
         <div className="board-wrapper">
           <Chessboard
             id="game-board"
             position={fen}
-            onPieceDrop={onDrop}
             onSquareClick={onSquareClick}
-            animationDuration={200}
+            animationDuration={180}
             boardWidth={boardWidth}
             customSquareStyles={{ ...moveSquares, ...optionSquares }}
             customBoardStyle={{ borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
             customDarkSquareStyle={{ backgroundColor: theme.darkSquare }}
             customLightSquareStyle={{ backgroundColor: theme.lightSquare }}
-            arePiecesDraggable={!isThinking && !gameRef.current.isGameOver()}
+            arePiecesDraggable={false} // Force click-to-move only
             showBoardNotation={true}
           />
         </div>
 
-        {/* Player info */}
-        <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginTop: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{ width: '36px', height: '36px', background: 'linear-gradient(135deg, var(--accent), var(--purple))', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', flexShrink: 0 }}>👤</div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>{user ? user.email.split('@')[0] : 'Guest'}</div>
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{user ? `ELO ${user.rating}` : 'Unrated'}</div>
+        {/* Player Panel */}
+        <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginTop: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ width: '36px', height: '36px', background: 'linear-gradient(135deg, var(--accent), var(--purple))', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>👤</div>
+            <div>
+              <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>{user ? user.email.split('@')[0] : 'Guest'}</div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>ELO {user ? user.rating : 0}</div>
+            </div>
           </div>
+          
+          {/* Player Timer */}
+          {selectedTime.value > 0 && (
+            <div style={{ fontSize: '1.25rem', fontWeight: '700', fontFamily: 'var(--font-mono)', background: 'rgba(79,140,255,0.1)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--accent)' }}>
+              ⏱️ {formatTime(playerTime)}
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Sidebar */}
+      {/* Sidebar Controls */}
       <div className="controls-panel">
-        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 100px)' }}>
-          <div className={statusClass} style={{ marginBottom: '1rem' }}>{status}</div>
+        <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '380px' }}>
+          <div className={`status-bar ${isThinking ? 'thinking' : ''}`} style={{ marginBottom: '1rem' }}>{status}</div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border)', marginBottom: '0.5rem' }}>
             <span style={{ fontWeight: '600', fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{t('move_history')}</span>
-            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{pairedMoves.length}</span>
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{pairedMoves.length} moves</span>
           </div>
 
           <div className="move-history" style={{ flex: 1, overflowY: 'auto', marginBottom: '1rem' }}>
             {pairedMoves.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '2rem', fontSize: '0.85rem' }}>{t('drag_or_click')}</p>
+              <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '2rem', fontSize: '0.85rem' }}>Tap a piece to select, then tap your target square to move.</p>
             ) : (
               <table><tbody>
                 {pairedMoves.map((pair, idx) => (
@@ -320,25 +489,84 @@ const ChessGame = ({ user }) => {
           </div>
 
           <div style={{ display: 'flex', gap: '8px', marginTop: 'auto' }}>
-            <button className="btn btn-secondary" style={{ flex: 1, padding: '9px' }} onClick={handleUndo} disabled={isThinking || moveHistory.length < 2}>↩ {t('undo')}</button>
-            <button className="btn btn-gold" style={{ flex: 1, padding: '9px' }} onClick={() => setGameState('menu')}>⊕ {t('new_game')}</button>
+            <button className="btn btn-secondary" style={{ flex: 1 }} onClick={handleResign} disabled={isThinking || gameRef.current.isGameOver()}>🏳️ Resign</button>
+            <button className="btn btn-gold" style={{ flex: 1 }} onClick={() => setGameState('menu')}>⊕ Quit</button>
           </div>
         </div>
-
-        {history.length > 0 && (
-          <div className="glass-panel" style={{ padding: '1rem' }}>
-            <div style={{ fontWeight: '600', fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.75rem' }}>{t('recent_matches')}</div>
-            {history.slice(0, 4).map((m, i) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>vs ELO {m.difficulty}</span>
-                <span className={`badge ${m.result === '1-0' ? 'badge-win' : m.result === '0-1' ? 'badge-loss' : 'badge-draw'}`}>
-                  {m.result === '1-0' ? '✓ Win' : m.result === '0-1' ? '✗ Loss' : '= Draw'}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
+
+      {/* GAME ANALYSIS MODAL OVERLAY */}
+      {showAnalysis && analysisData && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, padding: '20px' }}>
+          <div className="glass-panel fade-in" style={{ maxWidth: '580px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(201, 162, 39, 0.3)', padding: '24px' }}>
+            <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+              <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>📊</div>
+              <h2 style={{ marginBottom: '4px' }}>Game Analysis</h2>
+              <span className={`badge ${analysisData.result === '1-0' ? 'badge-win' : analysisData.result === '0-1' ? 'badge-loss' : 'badge-draw'}`} style={{ fontSize: '0.9rem', padding: '4px 14px' }}>
+                {analysisData.result === '1-0' ? '✓ Victory' : analysisData.result === '0-1' ? '✗ Defeat' : '= Draw'}
+              </span>
+            </div>
+
+            {/* Performance metrics */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: 'var(--gold)' }}>{analysisData.accuracy}%</div>
+                <div className="stat-label">Accuracy</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: 'var(--accent)' }}>{analysisData.performanceRating}</div>
+                <div className="stat-label">Performance ELO</div>
+              </div>
+            </div>
+
+            {/* Opening info */}
+            <div style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Opening Played:</span>
+              <strong style={{ color: 'var(--gold)', fontSize: '0.9rem' }}>{analysisData.openingName || 'Unknown Opening'}</strong>
+            </div>
+
+            {/* Move Classifications grid */}
+            <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>Move Classifications</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px', marginBottom: '1.5rem' }}>
+              {moveCategories.map(({ key, label, emoji, color }) => {
+                const val = analysisData.analysis?.[key] || 0;
+                return (
+                  <div key={key} style={{ padding: '8px 4px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: '6px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.1rem' }} title={label}>{emoji}</div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: '700', color, fontFamily: 'var(--font-mono)' }}>{val}</div>
+                    <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', overflow: 'hidden', textBreak: 'break-all', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Phase accuracy progress bars */}
+            <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>Phase Breakdown</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '2rem' }}>
+              {['opening', 'middlegame', 'endgame'].map((phase) => {
+                const val = analysisData.phasePerformance?.[phase] || 0;
+                if (phase === 'endgame' && val === 0) return null;
+                return (
+                  <div key={phase} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '0.85rem', textTransform: 'capitalize' }}>{phase}:</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '200px' }}>
+                      <div className="progress-bar-track" style={{ flex: 1, height: '6px' }}>
+                        <div className="progress-bar-fill" style={{ width: `${val}%` }} />
+                      </div>
+                      <span style={{ fontSize: '0.85rem', fontWeight: '700', fontFamily: 'var(--font-mono)' }}>{val}%</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Close button */}
+            <button className="btn btn-gold" style={{ width: '100%', padding: '12px' }} onClick={() => { setShowAnalysis(false); setGameState('menu'); }}>
+              Done & Return to Menu
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

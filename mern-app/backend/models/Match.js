@@ -19,8 +19,37 @@ const MatchSchema = new mongoose.Schema({
     default: 0
   },
   difficulty: {
-    type: Number, // 1-11
-    default: 1
+    type: Number,
+    default: 1200
+  },
+  timeControl: {
+    type: String,
+    default: 'no limit'
+  },
+  analysis: {
+    brilliant: { type: Number, default: 0 },
+    great: { type: Number, default: 0 },
+    best: { type: Number, default: 0 },
+    excellent: { type: Number, default: 0 },
+    good: { type: Number, default: 0 },
+    book: { type: Number, default: 0 },
+    inaccuracy: { type: Number, default: 0 },
+    mistake: { type: Number, default: 0 },
+    miss: { type: Number, default: 0 },
+    blunder: { type: Number, default: 0 }
+  },
+  performanceRating: {
+    type: Number,
+    default: 0
+  },
+  openingName: {
+    type: String,
+    default: 'Unknown Opening'
+  },
+  phasePerformance: {
+    opening: { type: Number, default: 0 },
+    middlegame: { type: Number, default: 0 },
+    endgame: { type: Number, default: 0 }
   },
   date: {
     type: Date,

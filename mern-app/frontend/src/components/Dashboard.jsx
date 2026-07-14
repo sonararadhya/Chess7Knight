@@ -1,18 +1,34 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import axios from 'axios';
 import { useLanguage } from '../contexts/LanguageContext';
-import { useTheme } from '../contexts/ThemeContext';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const Dashboard = ({ user }) => {
-  const { t, lang, setLang, LANG_LABELS } = useLanguage();
-  const { themeId, setThemeId, allThemes, useCustomCursor, setUseCustomCursor } = useTheme();
+  const { t } = useLanguage();
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
 
+  useEffect(() => { if (user) fetchHistory(); }, [user]);
+
+  const fetchHistory = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    setLoading(true);
+    try {
+      const res = await axios.get(`${API_URL}/matches/history`, { headers: { 'x-auth-token': token } });
+      setHistory(res.data);
+    } catch (err) { console.error('Error fetching history', err); }
+    finally { setLoading(false); }
+  };
+
+  // Only keep Play, Puzzles, Learn, and Practice cards (remove Profile)
   const features = [
     { to: '/play', icon: '♟', title: t('play'), desc: t('play_desc'), gradient: 'linear-gradient(135deg, rgba(79,140,255,0.12), rgba(155,109,255,0.06))', border: 'rgba(79,140,255,0.2)' },
     { to: '/puzzles', icon: '🧩', title: t('puzzles'), desc: t('puzzles_desc'), gradient: 'linear-gradient(135deg, rgba(155,109,255,0.12), rgba(79,140,255,0.06))', border: 'rgba(155,109,255,0.2)' },
     { to: '/learn', icon: '📚', title: t('learn'), desc: t('learn_desc'), gradient: 'linear-gradient(135deg, rgba(52,211,153,0.12), rgba(79,140,255,0.06))', border: 'rgba(52,211,153,0.2)' },
     { to: '/practice', icon: '⚔️', title: t('practice'), desc: t('practice_desc'), gradient: 'linear-gradient(135deg, rgba(251,191,36,0.12), rgba(201,162,39,0.06))', border: 'rgba(251,191,36,0.2)' },
-    { to: '/profile', icon: '👤', title: t('profile'), desc: t('profile_desc'), gradient: 'linear-gradient(135deg, rgba(201,162,39,0.12), rgba(79,140,255,0.06))', border: 'rgba(201,162,39,0.2)' },
   ];
 
   return (
@@ -43,7 +59,7 @@ const Dashboard = ({ user }) => {
       </div>
 
       {/* Feature cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
         {features.map(({ to, icon, title, desc, gradient, border }) => (
           <Link key={to} to={to} className="feature-card" style={{ background: gradient, borderColor: border }}>
             <div className="card-icon">{icon}</div>
@@ -53,61 +69,56 @@ const Dashboard = ({ user }) => {
         ))}
       </div>
 
-      {/* Settings */}
-      <div className="glass-panel">
-        <h3 style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '8px' }}>⚙️ {t('settings')}</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1.5rem' }}>
+      {/* Game history of player below the cards */}
+      {user && (
+        <div className="glass-panel">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border)' }}>
+            <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>📋 {t('recent_matches')}</h3>
+            <Link to="/profile" style={{ fontSize: '0.85rem', color: 'var(--gold)', textDecoration: 'none', fontWeight: '600' }}>View Profile →</Link>
+          </div>
 
-          <div>
-            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', fontWeight: '600' }}>
-              {t('board_theme')}
-            </label>
-            <select value={themeId} onChange={e => setThemeId(e.target.value)} className="form-control" style={{ fontSize: '0.9rem', padding: '9px 12px' }}>
-              {Object.entries(allThemes).map(([id, th]) => (
-                <option key={id} value={id}>{th.name}</option>
-              ))}
-            </select>
-            {/* Theme preview */}
-            <div style={{ display: 'flex', gap: '2px', marginTop: '8px' }}>
-              {[0,1,2,3].map(i => (
-                <div key={i} style={{ width: '20px', height: '20px', borderRadius: '3px', background: i % 2 === 0 ? allThemes[themeId].lightSquare : allThemes[themeId].darkSquare }} />
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '2rem' }}>
+              <div className="spinner" style={{ margin: '0 auto 1rem' }} /> Loading…
+            </div>
+          ) : history.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '2.5rem' }}>
+              <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>♟</div>
+              <p>{t('no_matches')}</p>
+              <Link to="/play" className="btn btn-sm" style={{ marginTop: '1rem' }}>{t('start_playing')}</Link>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {history.slice(0, 5).map((match, i) => (
+                <div key={match._id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                      {new Date(match.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                    </span>
+                    <span style={{ fontWeight: '500', fontSize: '0.88rem' }}>
+                      🤖 Bot ELO {match.difficulty || 1200}
+                    </span>
+                    {match.openingName && (
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'inline-block' }} className="desktop-only">
+                        • {match.openingName}
+                      </span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    <span className={`badge ${match.result === '1-0' ? 'badge-win' : match.result === '0-1' ? 'badge-loss' : 'badge-draw'}`}>
+                      {match.result === '1-0' ? '✓ Win' : match.result === '0-1' ? '✗ Loss' : '= Draw'}
+                    </span>
+                    <span style={{ color: (match.accuracy || 0) >= 90 ? 'var(--success)' : (match.accuracy || 0) >= 75 ? 'var(--warning)' : 'var(--danger)', fontWeight: '600', fontFamily: 'var(--font-mono)', fontSize: '0.88rem' }}>
+                      {match.accuracy || 0}%
+                    </span>
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px', fontWeight: '600' }}>
-              {t('language')}
-            </label>
-            <select value={lang} onChange={e => setLang(e.target.value)} className="form-control" style={{ fontSize: '0.9rem', padding: '9px 12px' }}>
-              {Object.entries(LANG_LABELS).map(([code, label]) => (
-                <option key={code} value={code}>{label}</option>
-              ))}
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer', userSelect: 'none' }}>
-              <div
-                onClick={() => setUseCustomCursor(!useCustomCursor)}
-                role="switch" aria-checked={useCustomCursor} tabIndex={0}
-                style={{
-                  width: '44px', height: '24px', borderRadius: '99px', cursor: 'pointer',
-                  background: useCustomCursor ? 'var(--gold)' : 'var(--border)',
-                  position: 'relative', transition: 'background 0.25s', flexShrink: 0,
-                }}
-              >
-                <div style={{
-                  position: 'absolute', top: '3px', left: useCustomCursor ? '22px' : '3px',
-                  width: '18px', height: '18px', borderRadius: '50%', background: '#fff',
-                  transition: 'left 0.25s', boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
-                }} />
-              </div>
-              <span style={{ fontSize: '0.9rem' }}>♛ {t('piece_cursor')}</span>
-            </label>
-          </div>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 };

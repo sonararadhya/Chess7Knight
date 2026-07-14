@@ -8,6 +8,7 @@ const Login = ({ onLogin }) => {
     password: ''
   });
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const { email, password } = formData;
 
@@ -43,14 +44,34 @@ const Login = ({ onLogin }) => {
           </div>
           <div className="form-group">
             <label>Password</label>
-            <input 
-              type="password" 
-              className="form-control" 
-              name="password" 
-              value={password} 
-              onChange={onChange} 
-              required 
-            />
+            <div style={{ position: 'relative' }}>
+              <input 
+                type={showPassword ? "text" : "password"}
+                className="form-control" 
+                name="password" 
+                value={password} 
+                onChange={onChange} 
+                required 
+                style={{ paddingRight: '2.5rem' }}
+              />
+              <button 
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute',
+                  right: '10px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  padding: 0
+                }}
+              >
+                {showPassword ? '👁️‍🗨️' : '👁️'}
+              </button>
+            </div>
           </div>
           <button type="submit" className="btn" style={{ width: '100%', marginTop: '1rem' }}>Login</button>
         </form>

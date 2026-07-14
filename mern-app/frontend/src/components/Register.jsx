@@ -9,6 +9,7 @@ const Register = ({ onLogin }) => {
     confirmPassword: ''
   });
   const [error, setError] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   const { email, password, confirmPassword } = formData;
 
@@ -48,27 +49,67 @@ const Register = ({ onLogin }) => {
           </div>
           <div className="form-group">
             <label>Password</label>
-            <input 
-              type="password" 
-              className="form-control" 
-              name="password" 
-              value={password} 
-              onChange={onChange} 
-              required 
-              minLength="6"
-            />
+            <div style={{ position: 'relative' }}>
+              <input 
+                type={showPassword ? "text" : "password"}
+                className="form-control" 
+                name="password" 
+                value={password} 
+                onChange={onChange} 
+                required 
+                minLength="6"
+                style={{ paddingRight: '2.5rem' }}
+              />
+              <button 
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute',
+                  right: '10px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  padding: 0
+                }}
+              >
+                {showPassword ? '👁️‍🗨️' : '👁️'}
+              </button>
+            </div>
           </div>
           <div className="form-group">
             <label>Confirm Password</label>
-            <input 
-              type="password" 
-              className="form-control" 
-              name="confirmPassword" 
-              value={confirmPassword} 
-              onChange={onChange} 
-              required 
-              minLength="6"
-            />
+            <div style={{ position: 'relative' }}>
+              <input 
+                type={showPassword ? "text" : "password"}
+                className="form-control" 
+                name="confirmPassword" 
+                value={confirmPassword} 
+                onChange={onChange} 
+                required 
+                minLength="6"
+                style={{ paddingRight: '2.5rem' }}
+              />
+              <button 
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                style={{
+                  position: 'absolute',
+                  right: '10px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  padding: 0
+                }}
+              >
+                {showPassword ? '👁️‍🗨️' : '👁️'}
+              </button>
+            </div>
           </div>
           <button type="submit" className="btn" style={{ width: '100%', marginTop: '1rem' }}>Register</button>
         </form>

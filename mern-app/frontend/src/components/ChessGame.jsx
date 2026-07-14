@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Chess } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 import axios from 'axios';
+import { useTheme } from '../contexts/ThemeContext';
 
 const ChessGame = ({ user }) => {
+  const { theme } = useTheme();
   const [gameState, setGameState] = useState('menu'); // 'menu' or 'playing'
   const [difficulty, setDifficulty] = useState('1200'); // ELO
   const [game, setGame] = useState(new Chess());
@@ -50,7 +52,7 @@ const ChessGame = ({ user }) => {
   };
 
   const makeBotMove = async () => {
-    if (game.game_over() || game.in_draw()) return;
+    if (game.isGameOver() || game.isDraw()) return;
 
     setStatus('Stockfish is thinking...');
     try {
@@ -99,8 +101,8 @@ const ChessGame = ({ user }) => {
       });
       setOptionSquares({}); // clear dots
 
-      if (gameCopy.game_over()) {
-        if (gameCopy.in_checkmate()) {
+      if (gameCopy.isGameOver()) {
+        if (gameCopy.isCheckmate()) {
           setStatus(`Checkmate! ${gameCopy.turn() === 'w' ? 'Black' : 'White'} wins!`);
           saveMatch(gameCopy.turn() === 'w' ? '0-1' : '1-0');
         } else {
@@ -170,7 +172,9 @@ const ChessGame = ({ user }) => {
     if (move === null) return false;
 
     // Trigger bot
-    if (!new Chess(game.fen()).move(move).game_over) {
+    const gameCopy = new Chess(game.fen());
+    gameCopy.move(move); // apply move to fresh copy to check status
+    if (!gameCopy.isGameOver()) {
         setTimeout(() => {
           makeBotMove();
         }, 300);
@@ -251,8 +255,8 @@ const ChessGame = ({ user }) => {
               borderRadius: '4px',
               boxShadow: '0 8px 32px rgba(0, 0, 0, 0.4)'
             }}
-            customDarkSquareStyle={{ backgroundColor: '#739552' }}
-            customLightSquareStyle={{ backgroundColor: '#ebecd0' }}
+            customDarkSquareStyle={{ backgroundColor: theme.darkSquare }}
+            customLightSquareStyle={{ backgroundColor: theme.lightSquare }}
           />
         </div>
 

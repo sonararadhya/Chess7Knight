@@ -1,16 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
+import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
+import { ThemeProvider } from './contexts/ThemeContext';
+import Dashboard from './components/Dashboard';
 import ChessGame from './components/ChessGame';
+import Puzzles from './components/Puzzles';
+import Learn from './components/Learn';
+import Profile from './components/Profile';
 import Login from './components/Login';
 import Register from './components/Register';
 import './index.css';
 
-function App() {
+function AppContent() {
+  const { t } = useLanguage();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
 
   useEffect(() => {
-    // Check for token on load
     const token = localStorage.getItem('token');
     const storedUser = localStorage.getItem('user');
     
@@ -35,47 +41,57 @@ function App() {
   };
 
   return (
-    <Router>
-      <div className="app">
-        <nav className="navbar">
-          <Link to="/" className="navbar-brand">
-            ♞ CHESS7KNIGHT
-          </Link>
-          <div className="nav-links">
-            {isAuthenticated ? (
-              <>
-                <span className="user-greeting">Welcome, {user.email.split('@')[0]} (ELO: {user.rating})</span>
-                <Link to="/">Play</Link>
-                <button onClick={handleLogout} className="btn btn-secondary">Logout</button>
-              </>
-            ) : (
-              <>
-                <Link to="/" className="btn btn-secondary" style={{ marginRight: '10px' }}>Play as Guest</Link>
-                <Link to="/login" className="btn btn-secondary">Login</Link>
-                <Link to="/register" className="btn">Sign Up</Link>
-              </>
-            )}
-          </div>
-        </nav>
+    <div className="app">
+      <nav className="navbar">
+        <Link to="/" className="navbar-brand">
+          ♞ CHESS7KNIGHT
+        </Link>
+        <div className="nav-links">
+          {isAuthenticated ? (
+            <>
+              <span className="user-greeting">ELO: {user.rating}</span>
+              <button onClick={handleLogout} className="btn btn-secondary">Logout</button>
+            </>
+          ) : (
+            <>
+              <Link to="/login" className="btn btn-secondary">{t('login')}</Link>
+              <Link to="/register" className="btn">{t('signup')}</Link>
+            </>
+          )}
+        </div>
+      </nav>
 
-        <main className="container">
-          <Routes>
-            <Route 
-              path="/" 
-              element={<ChessGame user={user} />} 
-            />
-            <Route 
-              path="/login" 
-              element={!isAuthenticated ? <Login onLogin={handleLogin} /> : <Navigate to="/" />} 
-            />
-            <Route 
-              path="/register" 
-              element={!isAuthenticated ? <Register onLogin={handleLogin} /> : <Navigate to="/" />} 
-            />
-          </Routes>
-        </main>
-      </div>
-    </Router>
+      <main className="container" style={{ paddingBottom: '2rem' }}>
+        <Routes>
+          <Route path="/" element={<Dashboard user={user} />} />
+          <Route path="/play" element={<ChessGame user={user} />} />
+          <Route path="/puzzles" element={<Puzzles />} />
+          <Route path="/learn" element={<Learn />} />
+          <Route path="/profile" element={<Profile user={user} />} />
+          
+          <Route 
+            path="/login" 
+            element={!isAuthenticated ? <Login onLogin={handleLogin} /> : <Navigate to="/" />} 
+          />
+          <Route 
+            path="/register" 
+            element={!isAuthenticated ? <Register onLogin={handleLogin} /> : <Navigate to="/" />} 
+          />
+        </Routes>
+      </main>
+    </div>
+  );
+}
+
+function App() {
+  return (
+    <ThemeProvider>
+      <LanguageProvider>
+        <Router>
+          <AppContent />
+        </Router>
+      </LanguageProvider>
+    </ThemeProvider>
   );
 }
 

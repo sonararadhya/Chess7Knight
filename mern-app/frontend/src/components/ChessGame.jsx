@@ -13,6 +13,7 @@ const ChessGame = ({ user }) => {
   const [status, setStatus] = useState('Your turn');
   const [optionSquares, setOptionSquares] = useState({});
   const [moveSquares, setMoveSquares] = useState({});
+  const [moveFrom, setMoveFrom] = useState(null);
 
   useEffect(() => {
     fetchHistory();
@@ -100,6 +101,7 @@ const ChessGame = ({ user }) => {
         [move.to]: { backgroundColor: 'rgba(255, 255, 0, 0.4)' }
       });
       setOptionSquares({}); // clear dots
+      setMoveFrom(null); // Clear selected piece
 
       if (gameCopy.isGameOver()) {
         if (gameCopy.isCheckmate()) {
@@ -122,7 +124,7 @@ const ChessGame = ({ user }) => {
     const moves = game.moves({ square, verbose: true });
     if (moves.length === 0) {
       setOptionSquares({});
-      return;
+      return false;
     }
 
     const newSquares = {};
@@ -137,26 +139,45 @@ const ChessGame = ({ user }) => {
     });
     newSquares[square] = { background: 'rgba(255, 255, 0, 0.4)' };
     setOptionSquares(newSquares);
+    return true;
   };
 
   const onSquareClick = (square) => {
-    // If a square is clicked and it's a valid move target from the currently selected piece
-    const gameCopy = new Chess(game.fen());
-    const piece = game.get(square);
-    
-    // Find if the clicked square is one of the option squares (meaning we're completing a move)
-    if (optionSquares[square] && optionSquares[square].borderRadius) {
-       // Find the source square
-       const sourceSquare = Object.keys(optionSquares).find(sq => optionSquares[sq].background === 'rgba(255, 255, 0, 0.4)');
-       if (sourceSquare) {
-         onDrop(sourceSquare, square);
-         return;
-       }
+    // If we have a selected piece
+    if (moveFrom) {
+      const move = makeAMove({
+        from: moveFrom,
+        to: square,
+        promotion: 'q'
+      });
+
+      // If illegal move (e.g. clicked another piece or empty square)
+      if (move === null) {
+        const hasMoves = getMoveOptions(square);
+        if (hasMoves) setMoveFrom(square);
+        else {
+          setMoveFrom(null);
+          setOptionSquares({});
+        }
+        return;
+      }
+
+      // Valid move made
+      setMoveFrom(null);
+      
+      const gameCopy = new Chess(game.fen());
+      gameCopy.move(move);
+      if (!gameCopy.isGameOver()) {
+        setTimeout(makeBotMove, 300);
+      }
+      return;
     }
 
-    // Otherwise, show options for the piece clicked
+    // First click on a piece
+    const piece = game.get(square);
     if (piece && piece.color === game.turn()) {
-      getMoveOptions(square);
+      const hasMoves = getMoveOptions(square);
+      if (hasMoves) setMoveFrom(square);
     } else {
       setOptionSquares({});
     }

@@ -368,8 +368,13 @@ const ChessGame = ({ user }) => {
 
   const makeAMove = useCallback((move) => {
     try {
+      console.log('Attempting move:', move);
       const result = gameRef.current.move(move);
-      if (!result) return null;
+      if (!result) {
+        console.warn('Move rejected by chess.js:', move);
+        return null;
+      }
+      console.log('Move successful. New FEN:', gameRef.current.fen());
       setFen(gameRef.current.fen());
       setMoveSquares({
         [result.from]: { backgroundColor: 'rgba(201, 162, 39, 0.4)' },
@@ -378,7 +383,10 @@ const ChessGame = ({ user }) => {
       setOptionSquares({});
       setMoveFrom(null);
       return result;
-    } catch { return null; }
+    } catch (error) {
+      console.error('Error during makeAMove:', error, move);
+      return null;
+    }
   }, []);
 
   const makeBotMove = useCallback(async () => {
@@ -438,7 +446,6 @@ const ChessGame = ({ user }) => {
       boxShadow: '0 0 0 5px var(--gold), 0 0 20px var(--gold)',
       backgroundColor: 'rgba(201, 162, 39, 0.25)',
       borderRadius: '8px',
-      zIndex: 10
     };
 
     moves.forEach((move) => {
@@ -454,7 +461,6 @@ const ChessGame = ({ user }) => {
           : 'rgba(79, 140, 255, 0.15)',
         borderRadius: isCapture ? '8px' : '50%',
         cursor: 'pointer',
-        zIndex: 10
       };
     });
 
@@ -471,30 +477,61 @@ const ChessGame = ({ user }) => {
     // Verify turn ownership in bot mode
     if (gameMode === 'bot' && turn !== actualColor[0]) return;
 
-    if (moveFrom && optionSquares[square] && square !== moveFrom) {
+    if (moveFrom) {
       const result = makeAMove({ from: moveFrom, to: square, promotion: 'q' });
       if (result !== null) {
-        const over = checkGameOver(gameRef.current);
-        if (!over && gameMode === 'bot') {
-          setTimeout(makeBotMove, 400);
-        }
+        checkGameOver(gameRef.current);
         return;
       }
-    }
-
-    const piece = gameRef.current.get(square);
-    if (piece && piece.color === turn) {
-      const hasMoves = getMoveOptions(square);
-      if (hasMoves) {
-        setMoveFrom(square);
+      // If move failed, check if clicked square contains another of our own pieces to switch selection
+      const piece = gameRef.current.get(square);
+      if (piece && piece.color === turn) {
+        const hasMoves = getMoveOptions(square);
+        if (hasMoves) {
+          setMoveFrom(square);
+        } else {
+          setMoveFrom(null);
+          setOptionSquares({});
+        }
       } else {
         setMoveFrom(null);
         setOptionSquares({});
       }
     } else {
-      setMoveFrom(null);
-      setOptionSquares({});
+      const piece = gameRef.current.get(square);
+      if (piece && piece.color === turn) {
+        const hasMoves = getMoveOptions(square);
+        if (hasMoves) {
+          setMoveFrom(square);
+        }
+      }
     }
+  };
+
+  // Drag-and-drop interaction handler
+  const onPieceDrop = (sourceSquare, targetSquare) => {
+    if (isThinking || gameRef.current.isGameOver() || gameState !== 'playing') return false;
+
+    const turn = gameRef.current.turn();
+
+    // Verify turn ownership in bot mode
+    if (gameMode === 'bot' && turn !== actualColor[0]) return false;
+
+    // Check if it's pawn promotion
+    const piece = gameRef.current.get(sourceSquare);
+    const isPromotion = piece && piece.type === 'p' && 
+      ((piece.color === 'w' && targetSquare[1] === '8') || (piece.color === 'b' && targetSquare[1] === '1'));
+
+    const result = makeAMove({
+      from: sourceSquare,
+      to: targetSquare,
+      promotion: isPromotion ? 'q' : undefined,
+    });
+
+    if (result === null) return false;
+
+    checkGameOver(gameRef.current);
+    return true;
   };
 
   // Start a fresh game
@@ -534,11 +571,6 @@ const ChessGame = ({ user }) => {
     localStorage.setItem('chess7k_active_game_status', t('your_turn'));
     localStorage.setItem('chess7k_active_game_mode', gameMode);
     localStorage.setItem('chess7k_active_game_color', finalColor);
-
-    // If actual color is black and mode is bot, trigger bot's opening move immediately
-    if (finalColor === 'black' && gameMode === 'bot') {
-      setTimeout(makeBotMove, 400);
-    }
   };
 
   const handleResign = () => {
@@ -582,6 +614,19 @@ const ChessGame = ({ user }) => {
     setGameState('menu');
     setShowAbandonPrompt(false);
   };
+
+  // Bot Turn Trigger Effect
+  useEffect(() => {
+    if (gameState === 'playing' && gameMode === 'bot' && !isThinking && !gameRef.current.isGameOver()) {
+      const turn = gameRef.current.turn();
+      const botColorChar = actualColor === 'white' ? 'b' : 'w';
+      if (turn === botColorChar) {
+        console.log("Bot's turn detected. Triggering bot move. FEN:", gameRef.current.fen());
+        const timer = setTimeout(makeBotMove, 400);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [fen, gameState, gameMode, isThinking, actualColor, makeBotMove]);
 
   // ── MENU VIEW ──
   if (gameState === 'menu') {
@@ -719,7 +764,7 @@ const ChessGame = ({ user }) => {
               {gameMode === 'bot' ? '🤖' : '👤'}
             </div>
             <div>
-              <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>{actualColor === 'white' ? opponentLabel : playerLabel}</div>
+              <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>{opponentLabel}</div>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                 {actualColor === 'white' ? 'Black Pieces' : 'White Pieces'}
               </div>
@@ -730,16 +775,18 @@ const ChessGame = ({ user }) => {
           {/* Top Timer */}
           {selectedTime.value > 0 && gameMode === 'bot' && (
             <div style={{ fontSize: '1.25rem', fontWeight: '700', fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.05)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-              ⏱️ {formatTime(actualColor === 'white' ? botTime : playerTime)}
+              ⏱️ {formatTime(botTime)}
             </div>
           )}
         </div>
 
-        {/* Board wrapper (pure click/tap-to-move) */}
+        {/* Board wrapper (supports both click and drag-and-drop) */}
         <div className="board-wrapper">
           <Chessboard
+            key={`${fen}-${actualColor}`}
             id="game-board"
             position={fen}
+            onPieceDrop={onPieceDrop}
             onSquareClick={onSquareClick}
             animationDuration={220}
             boardWidth={boardWidth}
@@ -747,7 +794,7 @@ const ChessGame = ({ user }) => {
             customBoardStyle={{ borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
             customDarkSquareStyle={{ backgroundColor: theme.darkSquare }}
             customLightSquareStyle={{ backgroundColor: theme.lightSquare }}
-            arePiecesDraggable={false}
+            arePiecesDraggable={gameMode === 'local' || (gameRef.current.turn() === actualColor[0] && !isThinking)}
             boardOrientation={actualColor}
             showBoardNotation={true}
           />
@@ -758,7 +805,7 @@ const ChessGame = ({ user }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <div style={{ width: '36px', height: '36px', background: 'linear-gradient(135deg, var(--accent), var(--purple))', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>👤</div>
             <div>
-              <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>{actualColor === 'white' ? playerLabel : opponentLabel}</div>
+              <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>{playerLabel}</div>
               <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                 {actualColor === 'white' ? 'White Pieces' : 'Black Pieces'}
               </div>
@@ -768,7 +815,7 @@ const ChessGame = ({ user }) => {
           {/* Bottom Timer */}
           {selectedTime.value > 0 && gameMode === 'bot' && (
             <div style={{ fontSize: '1.25rem', fontWeight: '700', fontFamily: 'var(--font-mono)', background: 'rgba(79,140,255,0.1)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--accent)' }}>
-              ⏱️ {formatTime(actualColor === 'white' ? playerTime : botTime)}
+              ⏱️ {formatTime(playerTime)}
             </div>
           )}
         </div>

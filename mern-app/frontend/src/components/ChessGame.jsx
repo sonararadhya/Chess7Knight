@@ -801,24 +801,26 @@ const ChessGame = ({ user }) => {
         {/* Board wrapper (supports both click and drag-and-drop) */}
         <div className="board-wrapper">
           <Chessboard
-            key={`${fen}-${actualColor}`}
-            id="game-board"
-            position={fen}
-            onPieceDrop={onPieceDrop}
-            onSquareClick={onSquareClick}
-            animationDurationInMs={220}
-            boardStyle={{ borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
-            squareStyles={{ ...moveSquares, ...optionSquares, ...dangerSquares }}
-            darkSquareStyle={{ backgroundColor: theme.darkSquare }}
-            lightSquareStyle={{ backgroundColor: theme.lightSquare }}
-            canDragPiece={({ square }) => {
-              if (isThinking || gameRef.current.isGameOver()) return false;
-              if (gameMode === 'local') return true;
-              const p = gameRef.current.get(square);
-              return p && p.color === actualColor[0];
+            key={actualColor}
+            options={{
+              id: 'game-board',
+              position: fen,
+              onPieceDrop: onPieceDrop,
+              onSquareClick: onSquareClick,
+              animationDurationInMs: 220,
+              boardStyle: { borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' },
+              squareStyles: { ...moveSquares, ...optionSquares, ...dangerSquares },
+              darkSquareStyle: { backgroundColor: theme.darkSquare },
+              lightSquareStyle: { backgroundColor: theme.lightSquare },
+              canDragPiece: ({ square }) => {
+                if (isThinking || gameRef.current.isGameOver()) return false;
+                if (gameMode === 'local') return true;
+                const p = gameRef.current.get(square);
+                return p && p.color === actualColor[0];
+              },
+              boardOrientation: actualColor,
+              showNotation: true,
             }}
-            boardOrientation={actualColor}
-            showNotation={true}
           />
         </div>
 

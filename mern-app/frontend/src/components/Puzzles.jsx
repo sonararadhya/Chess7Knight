@@ -180,18 +180,20 @@ const Puzzles = () => {
         {/* Board */}
         <div style={{ maxWidth: '500px', margin: '0 auto' }}>
           <Chessboard
-            id="puzzle-board"
-            position={fen}
-            onPieceDrop={onDrop}
-            onSquareClick={onSquareClick}
-            animationDurationInMs={200}
-            boardStyle={{ borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}
-            squareStyles={optionSquares}
-            darkSquareStyle={{ backgroundColor: theme.darkSquare }}
-            lightSquareStyle={{ backgroundColor: theme.lightSquare }}
-            canDragPiece={() => !completed}
-            boardOrientation={puzzle.fen.includes(' b ') ? 'black' : 'white'}
-            showNotation={true}
+            options={{
+              id: 'puzzle-board',
+              position: fen,
+              onPieceDrop: onDrop,
+              onSquareClick: onSquareClick,
+              animationDurationInMs: 200,
+              boardStyle: { borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' },
+              squareStyles: optionSquares,
+              darkSquareStyle: { backgroundColor: theme.darkSquare },
+              lightSquareStyle: { backgroundColor: theme.lightSquare },
+              canDragPiece: () => !completed,
+              boardOrientation: puzzle.fen.includes(' b ') ? 'black' : 'white',
+              showNotation: true,
+            }}
           />
         </div>
 

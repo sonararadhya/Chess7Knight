@@ -108,8 +108,9 @@ const Puzzles = () => {
     return true;
   };
 
-  const onSquareClick = (square) => {
-    if (completed) return;
+  // react-chessboard v5: onSquareClick receives { piece, square } object
+  const onSquareClick = ({ square } = {}) => {
+    if (!square || completed) return;
     const turn = gameRef.current.turn();
     if (moveFrom) {
       const success = tryMove(moveFrom, square);
@@ -130,7 +131,11 @@ const Puzzles = () => {
     }
   };
 
-  const onDrop = (src, tgt) => tryMove(src, tgt);
+  // react-chessboard v5: onPieceDrop receives { piece, sourceSquare, targetSquare } object
+  const onDrop = ({ sourceSquare, targetSquare } = {}) => {
+    if (!sourceSquare || !targetSquare) return false;
+    return tryMove(sourceSquare, targetSquare);
+  };
 
   const statusStyle = {
     info: { borderColor: 'var(--accent)', color: 'var(--accent)' },
@@ -179,15 +184,14 @@ const Puzzles = () => {
             position={fen}
             onPieceDrop={onDrop}
             onSquareClick={onSquareClick}
-            animationDuration={200}
-            boardWidth={boardWidth}
-            customSquareStyles={optionSquares}
-            customBoardStyle={{ borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}
-            customDarkSquareStyle={{ backgroundColor: theme.darkSquare }}
-            customLightSquareStyle={{ backgroundColor: theme.lightSquare }}
-            arePiecesDraggable={!completed}
+            animationDurationInMs={200}
+            boardStyle={{ borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}
+            squareStyles={optionSquares}
+            darkSquareStyle={{ backgroundColor: theme.darkSquare }}
+            lightSquareStyle={{ backgroundColor: theme.lightSquare }}
+            canDragPiece={() => !completed}
             boardOrientation={puzzle.fen.includes(' b ') ? 'black' : 'white'}
-            showBoardNotation={true}
+            showNotation={true}
           />
         </div>
 

@@ -109,8 +109,9 @@ const Practice = () => {
     return true;
   };
 
-  const onSquareClick = (square) => {
-    if (completed || !drill) return;
+  // react-chessboard v5: onSquareClick receives { piece, square } object
+  const onSquareClick = ({ square } = {}) => {
+    if (!square || completed || !drill) return;
     const turn = gameRef.current.turn();
     if (moveFrom) {
       const ok = tryMove(moveFrom, square);
@@ -180,17 +181,16 @@ const Practice = () => {
           <Chessboard
             id="practice-board"
             position={fen}
-            onPieceDrop={(s, t) => tryMove(s, t)}
+            onPieceDrop={({ sourceSquare, targetSquare } = {}) => sourceSquare && targetSquare ? tryMove(sourceSquare, targetSquare) : false}
             onSquareClick={onSquareClick}
-            animationDuration={200}
-            boardWidth={boardWidth}
-            customSquareStyles={optionSquares}
-            customBoardStyle={{ borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}
-            customDarkSquareStyle={{ backgroundColor: theme.darkSquare }}
-            customLightSquareStyle={{ backgroundColor: theme.lightSquare }}
-            arePiecesDraggable={!completed}
+            animationDurationInMs={200}
+            boardStyle={{ borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' }}
+            squareStyles={optionSquares}
+            darkSquareStyle={{ backgroundColor: theme.darkSquare }}
+            lightSquareStyle={{ backgroundColor: theme.lightSquare }}
+            canDragPiece={() => !completed}
             boardOrientation={drill.fen.includes(' b ') ? 'black' : 'white'}
-            showBoardNotation={true}
+            showNotation={true}
           />
         </div>
 

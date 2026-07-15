@@ -469,8 +469,9 @@ const ChessGame = ({ user }) => {
   };
 
   // Click-to-move / Tap-to-move interaction
-  const onSquareClick = (square) => {
-    if (isThinking || gameRef.current.isGameOver() || gameState !== 'playing') return;
+  // react-chessboard v5 calls onSquareClick with an OBJECT: { piece, square }
+  const onSquareClick = ({ square } = {}) => {
+    if (!square || isThinking || gameRef.current.isGameOver() || gameState !== 'playing') return;
 
     const turn = gameRef.current.turn();
 
@@ -481,11 +482,14 @@ const ChessGame = ({ user }) => {
       const result = makeAMove({ from: moveFrom, to: square, promotion: 'q' });
       if (result !== null) {
         checkGameOver(gameRef.current);
+        if (gameMode === 'bot') {
+          // Bot turn will auto-trigger via fen-change effect
+        }
         return;
       }
       // If move failed, check if clicked square contains another of our own pieces to switch selection
-      const piece = gameRef.current.get(square);
-      if (piece && piece.color === turn) {
+      const clickedPiece = gameRef.current.get(square);
+      if (clickedPiece && clickedPiece.color === turn) {
         const hasMoves = getMoveOptions(square);
         if (hasMoves) {
           setMoveFrom(square);
@@ -498,8 +502,8 @@ const ChessGame = ({ user }) => {
         setOptionSquares({});
       }
     } else {
-      const piece = gameRef.current.get(square);
-      if (piece && piece.color === turn) {
+      const clickedPiece = gameRef.current.get(square);
+      if (clickedPiece && clickedPiece.color === turn) {
         const hasMoves = getMoveOptions(square);
         if (hasMoves) {
           setMoveFrom(square);
@@ -509,7 +513,9 @@ const ChessGame = ({ user }) => {
   };
 
   // Drag-and-drop interaction handler
-  const onPieceDrop = (sourceSquare, targetSquare) => {
+  // react-chessboard v5 calls onPieceDrop with an OBJECT: { piece, sourceSquare, targetSquare }
+  const onPieceDrop = ({ sourceSquare, targetSquare } = {}) => {
+    if (!sourceSquare || !targetSquare) return false;
     if (isThinking || gameRef.current.isGameOver() || gameState !== 'playing') return false;
 
     const turn = gameRef.current.turn();
@@ -518,9 +524,9 @@ const ChessGame = ({ user }) => {
     if (gameMode === 'bot' && turn !== actualColor[0]) return false;
 
     // Check if it's pawn promotion
-    const piece = gameRef.current.get(sourceSquare);
-    const isPromotion = piece && piece.type === 'p' && 
-      ((piece.color === 'w' && targetSquare[1] === '8') || (piece.color === 'b' && targetSquare[1] === '1'));
+    const droppedPiece = gameRef.current.get(sourceSquare);
+    const isPromotion = droppedPiece && droppedPiece.type === 'p' &&
+      ((droppedPiece.color === 'w' && targetSquare[1] === '8') || (droppedPiece.color === 'b' && targetSquare[1] === '1'));
 
     const result = makeAMove({
       from: sourceSquare,
@@ -615,18 +621,30 @@ const ChessGame = ({ user }) => {
     setShowAbandonPrompt(false);
   };
 
-  // Bot Turn Trigger Effect
+  // Bot Turn Trigger Effect — fires on every fen change AND on game/color state changes
   useEffect(() => {
     if (gameState === 'playing' && gameMode === 'bot' && !isThinking && !gameRef.current.isGameOver()) {
       const turn = gameRef.current.turn();
       const botColorChar = actualColor === 'white' ? 'b' : 'w';
       if (turn === botColorChar) {
-        console.log("Bot's turn detected. Triggering bot move. FEN:", gameRef.current.fen());
-        const timer = setTimeout(makeBotMove, 400);
+        const timer = setTimeout(makeBotMove, 500);
         return () => clearTimeout(timer);
       }
     }
   }, [fen, gameState, gameMode, isThinking, actualColor, makeBotMove]);
+
+  // Separate effect: trigger bot move at game START when player chose Black
+  // (fen doesn't change on game start so the above effect won't fire)
+  useEffect(() => {
+    if (gameState === 'playing' && gameMode === 'bot' && actualColor === 'black' && !isThinking) {
+      const turn = gameRef.current.turn(); // Should be 'w' at game start
+      if (turn === 'w') {
+        const timer = setTimeout(makeBotMove, 600);
+        return () => clearTimeout(timer);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameState, actualColor, gameMode]);
 
   // ── MENU VIEW ──
   if (gameState === 'menu') {
@@ -788,15 +806,19 @@ const ChessGame = ({ user }) => {
             position={fen}
             onPieceDrop={onPieceDrop}
             onSquareClick={onSquareClick}
-            animationDuration={220}
-            boardWidth={boardWidth}
-            customSquareStyles={{ ...moveSquares, ...optionSquares, ...dangerSquares }}
-            customBoardStyle={{ borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
-            customDarkSquareStyle={{ backgroundColor: theme.darkSquare }}
-            customLightSquareStyle={{ backgroundColor: theme.lightSquare }}
-            arePiecesDraggable={gameMode === 'local' || (gameRef.current.turn() === actualColor[0] && !isThinking)}
+            animationDurationInMs={220}
+            boardStyle={{ borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' }}
+            squareStyles={{ ...moveSquares, ...optionSquares, ...dangerSquares }}
+            darkSquareStyle={{ backgroundColor: theme.darkSquare }}
+            lightSquareStyle={{ backgroundColor: theme.lightSquare }}
+            canDragPiece={({ square }) => {
+              if (isThinking || gameRef.current.isGameOver()) return false;
+              if (gameMode === 'local') return true;
+              const p = gameRef.current.get(square);
+              return p && p.color === actualColor[0];
+            }}
             boardOrientation={actualColor}
-            showBoardNotation={true}
+            showNotation={true}
           />
         </div>
 

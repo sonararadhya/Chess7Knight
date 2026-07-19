@@ -92,7 +92,7 @@ const Practice = () => {
     } catch { return false; }
   }, [completed, drill, t]);
 
-  const getMoveOptions = (square) => {
+  const getMoveOptions = useCallback((square) => {
     const moves = gameRef.current.moves({ square, verbose: true });
     if (!moves.length) { setOptionSquares({}); return false; }
     const sq = {};
@@ -107,10 +107,10 @@ const Practice = () => {
     sq[square] = { backgroundColor: 'rgba(201,162,39,0.5)' };
     setOptionSquares(sq);
     return true;
-  };
+  }, []);
 
   // react-chessboard v5: onSquareClick receives { piece, square } object
-  const onSquareClick = ({ square } = {}) => {
+  const onSquareClick = useCallback(({ square } = {}) => {
     if (!square || completed || !drill) return;
     const turn = gameRef.current.turn();
     if (moveFrom) {
@@ -128,7 +128,24 @@ const Practice = () => {
     if (p && p.color === turn) {
       if (getMoveOptions(square)) setMoveFrom(square);
     }
-  };
+  }, [completed, drill, moveFrom, tryMove, getMoveOptions]);
+
+  const catDrills = category ? DRILLS[category] : [];
+
+  const chessboardOptions = useMemo(() => ({
+    id: 'practice-board',
+    position: fen,
+    onPieceDrop: ({ sourceSquare, targetSquare } = {}) => sourceSquare && targetSquare ? tryMove(sourceSquare, targetSquare) : false,
+    onSquareClick: onSquareClick,
+    animationDurationInMs: 200,
+    boardStyle: { borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' },
+    squareStyles: optionSquares,
+    darkSquareStyle: { backgroundColor: theme.darkSquare },
+    lightSquareStyle: { backgroundColor: theme.lightSquare },
+    canDragPiece: () => !completed,
+    boardOrientation: drill?.fen.includes(' b ') ? 'black' : 'white',
+    showNotation: true,
+  }), [fen, tryMove, onSquareClick, optionSquares, theme, completed, drill]);
 
   // ── Category Selection ──
   if (!category) {
@@ -160,7 +177,6 @@ const Practice = () => {
 
   // ── Drill View ──
   const statusStyle = { info: { borderColor: 'var(--accent)', color: 'var(--accent)' }, success: { borderColor: 'var(--success)', color: 'var(--success)' }, error: { borderColor: 'var(--danger)', color: 'var(--danger)' } }[statusType];
-  const catDrills = DRILLS[category];
 
   return (
     <div className="fade-in" style={{ maxWidth: '620px', margin: '2rem auto' }}>
@@ -179,20 +195,7 @@ const Practice = () => {
 
         <div style={{ maxWidth: '480px', margin: '0 auto' }}>
           <Chessboard
-            options={{
-              id: 'practice-board',
-              position: fen,
-              onPieceDrop: ({ sourceSquare, targetSquare } = {}) => sourceSquare && targetSquare ? tryMove(sourceSquare, targetSquare) : false,
-              onSquareClick: onSquareClick,
-              animationDurationInMs: 200,
-              boardStyle: { borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' },
-              squareStyles: optionSquares,
-              darkSquareStyle: { backgroundColor: theme.darkSquare },
-              lightSquareStyle: { backgroundColor: theme.lightSquare },
-              canDragPiece: () => !completed,
-              boardOrientation: drill.fen.includes(' b ') ? 'black' : 'white',
-              showNotation: true,
-            }}
+            options={chessboardOptions}
           />
         </div>
 

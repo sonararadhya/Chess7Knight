@@ -183,6 +183,23 @@ const generateMoveReview = (movesList) => {
   return review;
 };
 
+const moveCategories = [
+  { key: 'brilliant', label: 'Brilliant', emoji: '💎', color: '#9b6dff' },
+  { key: 'great', label: 'Great Move', emoji: '⭐', color: '#4f8cff' },
+  { key: 'best', label: 'Best Move', emoji: '🟢', color: '#34d399' },
+  { key: 'excellent', label: 'Excellent', emoji: '✅', color: '#10b981' },
+  { key: 'good', label: 'Good', emoji: '👍', color: '#6b7280' },
+  { key: 'book', label: 'Book Move', emoji: '📖', color: '#c9a227' },
+  { key: 'inaccuracy', label: 'Inaccuracy', emoji: '❓', color: '#fbbf24' },
+  { key: 'mistake', label: 'Mistake', emoji: '⚠️', color: '#f59e0b' },
+  { key: 'miss', label: 'Missed Win', emoji: '❌', color: '#f97316' },
+  { key: 'blunder', label: 'Blunder', emoji: '🔴', color: '#f87171' }
+];
+
+const getMoveCategoryInfo = (classification) => {
+  return moveCategories.find(c => c.key === classification) || { label: 'Good', emoji: '👍', color: '#6b7280' };
+};
+
 const ChessGame = ({ user }) => {
   const { theme } = useTheme();
   const { t } = useLanguage();
@@ -618,7 +635,7 @@ const ChessGame = ({ user }) => {
     }
   };
 
-  const getMoveOptions = (square) => {
+  const getMoveOptions = useCallback((square) => {
     const moves = gameRef.current.moves({ square, verbose: true });
     if (moves.length === 0) {
       setOptionSquares({});
@@ -652,11 +669,11 @@ const ChessGame = ({ user }) => {
 
     setOptionSquares(newSquares);
     return true;
-  };
+  }, []);
 
   // Click-to-move / Tap-to-move interaction
   // react-chessboard v5 calls onSquareClick with an OBJECT: { piece, square }
-  const onSquareClick = ({ square } = {}) => {
+  const onSquareClick = useCallback(({ square } = {}) => {
     if (isReviewMode || currentMoveIndex !== pastFens.length - 1) return;
     if (!square || isThinking || gameRef.current.isGameOver() || gameState !== 'playing') return;
 
@@ -697,11 +714,11 @@ const ChessGame = ({ user }) => {
         }
       }
     }
-  };
+  }, [isReviewMode, currentMoveIndex, pastFens.length, isThinking, gameState, gameMode, actualColor, moveFrom, makeAMove, checkGameOver, getMoveOptions]);
 
   // Drag-and-drop interaction handler
   // react-chessboard v5 calls onPieceDrop with an OBJECT: { piece, sourceSquare, targetSquare }
-  const onPieceDrop = ({ sourceSquare, targetSquare } = {}) => {
+  const onPieceDrop = useCallback(({ sourceSquare, targetSquare } = {}) => {
     if (isReviewMode || currentMoveIndex !== pastFens.length - 1) return false;
     if (!sourceSquare || !targetSquare) return false;
     if (isThinking || gameRef.current.isGameOver() || gameState !== 'playing') return false;
@@ -726,7 +743,72 @@ const ChessGame = ({ user }) => {
 
     checkGameOver(gameRef.current);
     return true;
-  };
+  }, [isReviewMode, currentMoveIndex, pastFens.length, isThinking, gameState, gameMode, actualColor, makeAMove, checkGameOver]);
+
+  const getReviewSquareStyles = useCallback(() => {
+    if (!isReviewMode || reviewIndex === 0) return {};
+    const move = reviewHistory[reviewIndex - 1];
+    if (!move) return {};
+    const catInfo = getMoveCategoryInfo(move.classification);
+    
+    const styles = {};
+    if (move.from && move.to) {
+      styles[move.from] = { backgroundColor: `${catInfo.color}33` }; // 20% opacity
+      styles[move.to] = { 
+        backgroundColor: `${catInfo.color}44`,
+        boxShadow: `inset 0 0 0 3px ${catInfo.color}`
+      };
+    }
+    return styles;
+  }, [isReviewMode, reviewIndex, reviewHistory]);
+
+  const jumpToMove = useCallback((index) => {
+    if (index < 0 || index >= pastFens.length) return;
+    setCurrentMoveIndex(index);
+  }, [pastFens.length]);
+
+  const chessboardOptions = useMemo(() => {
+    return {
+      id: 'game-board',
+      position: isReviewMode 
+        ? (reviewIndex === 0 ? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' : (reviewHistory[reviewIndex - 1]?.fenAfter || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1')) 
+        : pastFens[currentMoveIndex],
+      onPieceDrop: onPieceDrop,
+      onSquareClick: onSquareClick,
+      animationDurationInMs: 220,
+      boardStyle: { borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' },
+      squareStyles: isReviewMode 
+        ? getReviewSquareStyles() 
+        : { ...moveSquares, ...optionSquares, ...dangerSquares },
+      darkSquareStyle: { backgroundColor: theme.darkSquare },
+      lightSquareStyle: { backgroundColor: theme.lightSquare },
+      canDragPiece: ({ square }) => {
+        if (isReviewMode || currentMoveIndex !== pastFens.length - 1) return false;
+        if (isThinking || gameRef.current.isGameOver()) return false;
+        if (gameMode === 'local') return true;
+        const p = gameRef.current.get(square);
+        return p && p.color === actualColor[0];
+      },
+      boardOrientation: actualColor,
+      showNotation: true,
+    };
+  }, [
+    isReviewMode,
+    reviewIndex,
+    reviewHistory,
+    pastFens,
+    currentMoveIndex,
+    onPieceDrop,
+    onSquareClick,
+    getReviewSquareStyles,
+    moveSquares,
+    optionSquares,
+    dangerSquares,
+    theme,
+    isThinking,
+    actualColor,
+    gameMode
+  ]);
 
   // Start a fresh game
   const resetGame = () => {
@@ -954,41 +1036,8 @@ const ChessGame = ({ user }) => {
     pairedMoves.push({ white: moveHistory[i], black: moveHistory[i + 1] || '' });
   }
 
-  const moveCategories = [
-    { key: 'brilliant', label: 'Brilliant', emoji: '💎', color: '#9b6dff' },
-    { key: 'great', label: 'Great Move', emoji: '⭐', color: '#4f8cff' },
-    { key: 'best', label: 'Best Move', emoji: '🟢', color: '#34d399' },
-    { key: 'excellent', label: 'Excellent', emoji: '✅', color: '#10b981' },
-    { key: 'good', label: 'Good', emoji: '👍', color: '#6b7280' },
-    { key: 'book', label: 'Book Move', emoji: '📖', color: '#c9a227' },
-    { key: 'inaccuracy', label: 'Inaccuracy', emoji: '❓', color: '#fbbf24' },
-    { key: 'mistake', label: 'Mistake', emoji: '⚠️', color: '#f59e0b' },
-    { key: 'miss', label: 'Missed Win', emoji: '❌', color: '#f97316' },
-    { key: 'blunder', label: 'Blunder', emoji: '🔴', color: '#f87171' }
-  ];
-
   const opponentLabel = gameMode === 'bot' ? `Bot ELO ${selectedElo}` : 'Local Opponent';
   const playerLabel = gameMode === 'bot' ? (user ? user.email.split('@')[0] : 'Guest') : 'Local Player';
-
-  const getMoveCategoryInfo = (classification) => {
-    return moveCategories.find(c => c.key === classification) || { label: 'Good', emoji: '👍', color: '#6b7280' };
-  };
-
-  const getReviewSquareStyles = () => {
-    if (!isReviewMode || reviewIndex === 0) return {};
-    const move = reviewHistory[reviewIndex - 1];
-    const catInfo = getMoveCategoryInfo(move.classification);
-    
-    const styles = {};
-    if (move.from && move.to) {
-      styles[move.from] = { backgroundColor: `${catInfo.color}33` }; // 20% opacity
-      styles[move.to] = { 
-        backgroundColor: `${catInfo.color}44`,
-        boxShadow: `inset 0 0 0 3px ${catInfo.color}`
-      };
-    }
-    return styles;
-  };
 
   const startInteractiveReview = () => {
     const history = gameRef.current.history({ verbose: true });
@@ -997,11 +1046,6 @@ const ChessGame = ({ user }) => {
     setReviewIndex(analyzed.length);
     setIsReviewMode(true);
     setShowAnalysis(false);
-  };
-
-  const jumpToMove = (index) => {
-    if (index < 0 || index >= pastFens.length) return;
-    setCurrentMoveIndex(index);
   };
 
   return (
@@ -1035,30 +1079,7 @@ const ChessGame = ({ user }) => {
         <div className="board-wrapper">
           <Chessboard
             key={actualColor}
-            options={{
-              id: 'game-board',
-              position: isReviewMode 
-                ? (reviewIndex === 0 ? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' : reviewHistory[reviewIndex - 1].fenAfter) 
-                : pastFens[currentMoveIndex],
-              onPieceDrop: onPieceDrop,
-              onSquareClick: onSquareClick,
-              animationDurationInMs: 220,
-              boardStyle: { borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' },
-              squareStyles: isReviewMode 
-                ? getReviewSquareStyles() 
-                : { ...moveSquares, ...optionSquares, ...dangerSquares },
-              darkSquareStyle: { backgroundColor: theme.darkSquare },
-              lightSquareStyle: { backgroundColor: theme.lightSquare },
-              canDragPiece: ({ square }) => {
-                if (isReviewMode || currentMoveIndex !== pastFens.length - 1) return false;
-                if (isThinking || gameRef.current.isGameOver()) return false;
-                if (gameMode === 'local') return true;
-                const p = gameRef.current.get(square);
-                return p && p.color === actualColor[0];
-              },
-              boardOrientation: actualColor,
-              showNotation: true,
-            }}
+            options={chessboardOptions}
           />
         </div>
 

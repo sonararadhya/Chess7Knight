@@ -90,7 +90,7 @@ const Puzzles = () => {
     } catch { return false; }
   }, [completed, currentPuzzle, puzzle, loadPuzzle, t, bestStreak]);
 
-  const getMoveOptions = (square) => {
+  const getMoveOptions = useCallback((square) => {
     const moves = gameRef.current.moves({ square, verbose: true });
     if (moves.length === 0) { setOptionSquares({}); return false; }
     const newSquares = {};
@@ -106,10 +106,10 @@ const Puzzles = () => {
     newSquares[square] = { backgroundColor: 'rgba(201, 162, 39, 0.5)' };
     setOptionSquares(newSquares);
     return true;
-  };
+  }, []);
 
   // react-chessboard v5: onSquareClick receives { piece, square } object
-  const onSquareClick = ({ square } = {}) => {
+  const onSquareClick = useCallback(({ square } = {}) => {
     if (!square || completed) return;
     const turn = gameRef.current.turn();
     if (moveFrom) {
@@ -129,13 +129,28 @@ const Puzzles = () => {
       const hasMoves = getMoveOptions(square);
       if (hasMoves) setMoveFrom(square);
     }
-  };
+  }, [completed, moveFrom, tryMove, getMoveOptions]);
 
   // react-chessboard v5: onPieceDrop receives { piece, sourceSquare, targetSquare } object
-  const onDrop = ({ sourceSquare, targetSquare } = {}) => {
+  const onDrop = useCallback(({ sourceSquare, targetSquare } = {}) => {
     if (!sourceSquare || !targetSquare) return false;
     return tryMove(sourceSquare, targetSquare);
-  };
+  }, [tryMove]);
+
+  const chessboardOptions = useMemo(() => ({
+    id: 'puzzle-board',
+    position: fen,
+    onPieceDrop: onDrop,
+    onSquareClick: onSquareClick,
+    animationDurationInMs: 200,
+    boardStyle: { borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' },
+    squareStyles: optionSquares,
+    darkSquareStyle: { backgroundColor: theme.darkSquare },
+    lightSquareStyle: { backgroundColor: theme.lightSquare },
+    canDragPiece: () => !completed,
+    boardOrientation: puzzle.fen.includes(' b ') ? 'black' : 'white',
+    showNotation: true,
+  }), [fen, onDrop, onSquareClick, optionSquares, theme, completed, puzzle]);
 
   const statusStyle = {
     info: { borderColor: 'var(--accent)', color: 'var(--accent)' },
@@ -180,20 +195,7 @@ const Puzzles = () => {
         {/* Board */}
         <div style={{ maxWidth: '500px', margin: '0 auto' }}>
           <Chessboard
-            options={{
-              id: 'puzzle-board',
-              position: fen,
-              onPieceDrop: onDrop,
-              onSquareClick: onSquareClick,
-              animationDurationInMs: 200,
-              boardStyle: { borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' },
-              squareStyles: optionSquares,
-              darkSquareStyle: { backgroundColor: theme.darkSquare },
-              lightSquareStyle: { backgroundColor: theme.lightSquare },
-              canDragPiece: () => !completed,
-              boardOrientation: puzzle.fen.includes(' b ') ? 'black' : 'white',
-              showNotation: true,
-            }}
+            options={chessboardOptions}
           />
         </div>
 

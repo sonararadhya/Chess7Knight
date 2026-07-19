@@ -10,6 +10,7 @@ import Practice from './components/Practice';
 import Profile from './components/Profile';
 import Login from './components/Login';
 import Register from './components/Register';
+import UpdatePassword from './components/UpdatePassword';
 import './index.css';
 
 /* Floating chess-piece background */
@@ -69,6 +70,11 @@ function AppContent() {
     setUser(null);
   };
 
+  const handlePasswordChanged = (updatedUserData) => {
+    localStorage.setItem('user', JSON.stringify(updatedUserData));
+    setUser(updatedUserData);
+  };
+
   const navItems = [
     { to: '/play', icon: '♟', label: t('play') },
     { to: '/puzzles', icon: '🧩', label: t('puzzles') },
@@ -76,6 +82,28 @@ function AppContent() {
     { to: '/practice', icon: '⚔️', label: t('practice') },
     { to: '/profile', icon: '👤', label: t('profile') },
   ];
+
+  if (isAuthenticated && user?.mustChangePassword) {
+    return (
+      <div className="app">
+        <ChessBg />
+        <nav className="navbar">
+          <div className="navbar-brand" style={{ pointerEvents: 'none' }}>
+            <img src="/logo.png" alt="Chess7Knight" />
+            <span>CHESS7KNIGHT</span>
+          </div>
+          <div className="nav-links">
+            <button onClick={handleLogout} className="btn btn-secondary btn-sm">{t('logout')}</button>
+          </div>
+        </nav>
+        <main className="container" style={{ paddingBottom: '3rem' }}>
+          <Routes>
+            <Route path="*" element={<UpdatePassword user={user} onPasswordChanged={handlePasswordChanged} />} />
+          </Routes>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="app">

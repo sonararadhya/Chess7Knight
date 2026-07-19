@@ -225,6 +225,7 @@ const ChessGame = ({ user }) => {
   const [isReviewMode, setIsReviewMode] = useState(false);
   const [reviewHistory, setReviewHistory] = useState([]);
   const [reviewIndex, setReviewIndex] = useState(0);
+  const [isGameOverState, setIsGameOverState] = useState(false);
 
   // State Persistence keys
   const getPersistKeys = () => ({
@@ -360,7 +361,7 @@ const ChessGame = ({ user }) => {
   }, []);
 
   const saveStateToStorage = useCallback((customStatus) => {
-    if (gameState !== 'playing') return;
+    if (gameState !== 'playing' || isGameOverState) return;
     const keys = getPersistKeys();
     localStorage.setItem(keys.state, 'playing');
     localStorage.setItem(keys.fen, gameRef.current.fen());
@@ -372,7 +373,7 @@ const ChessGame = ({ user }) => {
     localStorage.setItem(keys.statusText, customStatus || status);
     localStorage.setItem(keys.mode, gameMode);
     localStorage.setItem(keys.color, actualColor);
-  }, [gameState, selectedElo, selectedTime, playerTime, botTime, status, gameMode, actualColor]);
+  }, [gameState, selectedElo, selectedTime, playerTime, botTime, status, gameMode, actualColor, isGameOverState]);
 
   const clearStorageGame = () => {
     const keys = getPersistKeys();
@@ -380,10 +381,10 @@ const ChessGame = ({ user }) => {
   };
 
   useEffect(() => {
-    if (gameState === 'playing') {
+    if (gameState === 'playing' && !isGameOverState) {
       saveStateToStorage();
     }
-  }, [fen, playerTime, botTime, gameState, saveStateToStorage]);
+  }, [fen, playerTime, botTime, gameState, isGameOverState, saveStateToStorage]);
 
   // Responsive board size
   useEffect(() => {
@@ -430,6 +431,7 @@ const ChessGame = ({ user }) => {
 
   const handleTimeout = (result) => {
     if (timerRef.current) clearInterval(timerRef.current);
+    setIsGameOverState(true);
     const winner = result === '1-0' ? 'White' : 'Black';
     const statusText = `⏱️ Timeout! ${winner} wins!`;
     setStatus(statusText);
@@ -524,6 +526,7 @@ const ChessGame = ({ user }) => {
   const checkGameOver = useCallback((g) => {
     if (g.isGameOver()) {
       if (timerRef.current) clearInterval(timerRef.current);
+      setIsGameOverState(true);
       clearStorageGame();
       if (g.isCheckmate()) {
         const winner = g.turn() === 'w' ? 'Black' : 'White';
@@ -728,6 +731,7 @@ const ChessGame = ({ user }) => {
   // Start a fresh game
   const resetGame = () => {
     gameRef.current = new Chess();
+    setIsGameOverState(false);
     const startFen = gameRef.current.fen();
     setFen(startFen);
     setPastFens([startFen]);
@@ -772,6 +776,7 @@ const ChessGame = ({ user }) => {
 
   const handleResign = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    setIsGameOverState(true);
     setStatus('🏳️ You resigned. Match over.');
     clearStorageGame();
     saveMatch('0-1');
@@ -784,6 +789,7 @@ const ChessGame = ({ user }) => {
     const isAccepted = Math.random() > 0.6;
     if (isAccepted) {
       if (timerRef.current) clearInterval(timerRef.current);
+      setIsGameOverState(true);
       setStatus('½ Draw agreed.');
       clearStorageGame();
       saveMatch('1/2-1/2');
@@ -801,11 +807,13 @@ const ChessGame = ({ user }) => {
     } else {
       clearStorageGame();
       setGameState('menu');
+      setIsGameOverState(false);
     }
   };
 
   const confirmAbandon = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    setIsGameOverState(true);
     clearStorageGame();
     saveMatch('0-1'); // Counted as loss
     setGameState('menu');
@@ -1267,7 +1275,7 @@ const ChessGame = ({ user }) => {
 
             {/* Exit Button */}
             <div style={{ marginTop: 'auto' }}>
-              <button className="btn btn-gold btn-sm" style={{ width: '100%' }} onClick={() => { setIsReviewMode(false); setGameState('menu'); }}>
+              <button className="btn btn-gold btn-sm" style={{ width: '100%' }} onClick={() => { setIsReviewMode(false); setGameState('menu'); setIsGameOverState(false); }}>
                 Done & Return to Menu
               </button>
             </div>
@@ -1466,7 +1474,7 @@ const ChessGame = ({ user }) => {
               <button 
                 className="btn btn-secondary" 
                 style={{ flex: 1, padding: '12px' }} 
-                onClick={() => { setShowAnalysis(false); setGameState('menu'); }}
+                onClick={() => { setShowAnalysis(false); setGameState('menu'); setIsGameOverState(false); }}
               >
                 Return to Menu
               </button>

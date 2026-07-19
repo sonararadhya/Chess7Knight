@@ -11,6 +11,19 @@ const User = require('../models/User');
 router.post('/register', async (req, res) => {
   const { email, password } = req.body;
 
+  if (typeof email !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ msg: 'Invalid input format' });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ msg: 'Invalid email address format' });
+  }
+
+  if (password.length < 6) {
+    return res.status(400).json({ msg: 'Password must be at least 6 characters long' });
+  }
+
   try {
     let user = await User.findOne({ email });
     if (user) {
@@ -39,7 +52,15 @@ router.post('/register', async (req, res) => {
       { expiresIn: 360000 },
       (err, token) => {
         if (err) throw err;
-        res.json({ token, user: { id: user.id, email: user.email, rating: user.rating } });
+        res.json({
+          token,
+          user: {
+            id: user.id,
+            email: user.email,
+            rating: user.rating,
+            mustChangePassword: user.mustChangePassword
+          }
+        });
       }
     );
   } catch (err) {
@@ -53,6 +74,10 @@ router.post('/register', async (req, res) => {
 // @access  Public
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
+
+  if (typeof email !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ msg: 'Invalid input format' });
+  }
 
   try {
     let user = await User.findOne({ email });
@@ -77,7 +102,15 @@ router.post('/login', async (req, res) => {
       { expiresIn: 360000 },
       (err, token) => {
         if (err) throw err;
-        res.json({ token, user: { id: user.id, email: user.email, rating: user.rating } });
+        res.json({
+          token,
+          user: {
+            id: user.id,
+            email: user.email,
+            rating: user.rating,
+            mustChangePassword: user.mustChangePassword
+          }
+        });
       }
     );
   } catch (err) {
@@ -93,6 +126,80 @@ router.get('/user', auth, async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select('-password');
     res.json(user);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server error');
+  }
+});
+
+// @route   POST api/auth/forgot-password
+// @desc    Generate random temp password and mark user
+// @access  Public
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+
+  if (typeof email !== 'string') {
+    return res.status(400).json({ msg: 'Invalid email format' });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ msg: 'Invalid email address format' });
+  }
+
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ msg: 'No user found with this email' });
+    }
+
+    const crypto = require('crypto');
+    const tempPassword = crypto.randomBytes(6).toString('hex'); // 12-char secure random string
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(tempPassword, salt);
+    user.mustChangePassword = true;
+    await user.save();
+
+    console.log(`[SECURITY] Temporary password for ${email} is: ${tempPassword}`);
+
+    res.json({ msg: 'Temporary password generated.', tempPassword });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server error');
+  }
+});
+
+// @route   POST api/auth/update-password
+// @desc    Update password after temporary login
+// @access  Private
+router.post('/update-password', auth, async (req, res) => {
+  const { newPassword } = req.body;
+
+  if (typeof newPassword !== 'string' || newPassword.length < 6) {
+    return res.status(400).json({ msg: 'Password must be at least 6 characters long' });
+  }
+
+  try {
+    const user = await User.findById(req.user.id);
+    if (!user) {
+      return res.status(400).json({ msg: 'User not found' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+    user.mustChangePassword = false;
+    await user.save();
+
+    res.json({
+      msg: 'Password updated successfully.',
+      user: {
+        id: user.id,
+        email: user.email,
+        rating: user.rating,
+        mustChangePassword: false
+      }
+    });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error');

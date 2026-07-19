@@ -223,6 +223,7 @@ const ChessGame = ({ user }) => {
   const [moveSquares, setMoveSquares] = useState({});
   const [moveFrom, setMoveFrom] = useState(null);
   const [boardWidth, setBoardWidth] = useState(480);
+  const [promotionPending, setPromotionPending] = useState(null); // { from, to, color }
 
   // Helper features
   const [showDanger, setShowDanger] = useState(false);
@@ -635,6 +636,33 @@ const ChessGame = ({ user }) => {
     }
   };
 
+  const checkIfPromotionMove = useCallback((from, to) => {
+    const piece = gameRef.current.get(from);
+    if (!piece || piece.type !== 'p') return false;
+    
+    const isDestCorrect = (piece.color === 'w' && to[1] === '8') || (piece.color === 'b' && to[1] === '1');
+    if (!isDestCorrect) return false;
+
+    const moves = gameRef.current.moves({ square: from, verbose: true });
+    return moves.some(m => m.to === to);
+  }, []);
+
+  const handleSelectPromotion = useCallback((pieceType) => {
+    if (!promotionPending) return;
+    const { from, to } = promotionPending;
+    setPromotionPending(null);
+
+    const result = makeAMove({
+      from,
+      to,
+      promotion: pieceType
+    });
+
+    if (result !== null) {
+      checkGameOver(gameRef.current);
+    }
+  }, [promotionPending, makeAMove, checkGameOver]);
+
   const getMoveOptions = useCallback((square) => {
     const moves = gameRef.current.moves({ square, verbose: true });
     if (moves.length === 0) {
@@ -683,7 +711,17 @@ const ChessGame = ({ user }) => {
     if (gameMode === 'bot' && turn !== actualColor[0]) return;
 
     if (moveFrom) {
-      const result = makeAMove({ from: moveFrom, to: square, promotion: 'q' });
+      if (checkIfPromotionMove(moveFrom, square)) {
+        setPromotionPending({
+          from: moveFrom,
+          to: square,
+          color: gameRef.current.get(moveFrom)?.color
+        });
+        setMoveFrom(null);
+        setOptionSquares({});
+        return;
+      }
+      const result = makeAMove({ from: moveFrom, to: square });
       if (result !== null) {
         checkGameOver(gameRef.current);
         if (gameMode === 'bot') {
@@ -714,7 +752,7 @@ const ChessGame = ({ user }) => {
         }
       }
     }
-  }, [isReviewMode, currentMoveIndex, pastFens.length, isThinking, gameState, gameMode, actualColor, moveFrom, makeAMove, checkGameOver, getMoveOptions]);
+  }, [isReviewMode, currentMoveIndex, pastFens.length, isThinking, gameState, gameMode, actualColor, moveFrom, makeAMove, checkGameOver, getMoveOptions, checkIfPromotionMove]);
 
   // Drag-and-drop interaction handler
   // react-chessboard v5 calls onPieceDrop with an OBJECT: { piece, sourceSquare, targetSquare }
@@ -729,21 +767,27 @@ const ChessGame = ({ user }) => {
     if (gameMode === 'bot' && turn !== actualColor[0]) return false;
 
     // Check if it's pawn promotion
-    const droppedPiece = gameRef.current.get(sourceSquare);
-    const isPromotion = droppedPiece && droppedPiece.type === 'p' &&
-      ((droppedPiece.color === 'w' && targetSquare[1] === '8') || (droppedPiece.color === 'b' && targetSquare[1] === '1'));
+    if (checkIfPromotionMove(sourceSquare, targetSquare)) {
+      setPromotionPending({
+        from: sourceSquare,
+        to: targetSquare,
+        color: gameRef.current.get(sourceSquare)?.color
+      });
+      setMoveFrom(null);
+      setOptionSquares({});
+      return true;
+    }
 
     const result = makeAMove({
       from: sourceSquare,
       to: targetSquare,
-      promotion: isPromotion ? 'q' : undefined,
     });
 
     if (result === null) return false;
 
     checkGameOver(gameRef.current);
     return true;
-  }, [isReviewMode, currentMoveIndex, pastFens.length, isThinking, gameState, gameMode, actualColor, makeAMove, checkGameOver]);
+  }, [isReviewMode, currentMoveIndex, pastFens.length, isThinking, gameState, gameMode, actualColor, makeAMove, checkGameOver, checkIfPromotionMove]);
 
   const getReviewSquareStyles = useCallback(() => {
     if (!isReviewMode || reviewIndex === 0) return {};
@@ -821,6 +865,7 @@ const ChessGame = ({ user }) => {
     setMoveSquares({});
     setOptionSquares({});
     setMoveFrom(null);
+    setPromotionPending(null);
     setIsThinking(false);
     setShowAnalysis(false);
     setAnalysisData(null);
@@ -1081,6 +1126,76 @@ const ChessGame = ({ user }) => {
             key={actualColor}
             options={chessboardOptions}
           />
+          {promotionPending && (
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(10, 14, 26, 0.9)',
+              backdropFilter: 'blur(8px)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 100,
+              borderRadius: '8px',
+              animation: 'fadeIn 0.2s ease-out'
+            }}>
+              <h4 style={{ color: '#fff', marginBottom: '1.2rem', fontWeight: '700', letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.9rem' }}>
+                Select Promotion Piece
+              </h4>
+              <div style={{ display: 'flex', gap: '14px' }}>
+                {[
+                  { key: 'q', label: 'Queen', emoji: promotionPending.color === 'w' ? '♕' : '♛' },
+                  { key: 'r', label: 'Rook', emoji: promotionPending.color === 'w' ? '♖' : '♜' },
+                  { key: 'b', label: 'Bishop', emoji: promotionPending.color === 'w' ? '♗' : '♝' },
+                  { key: 'n', label: 'Knight', emoji: promotionPending.color === 'w' ? '♘' : '♞' },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => handleSelectPromotion(item.key)}
+                    className="btn btn-secondary"
+                    style={{
+                      width: '64px',
+                      height: '64px',
+                      fontSize: '2rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      padding: 0,
+                      borderRadius: '12px',
+                      border: '1px solid var(--border)',
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseOver={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--gold)';
+                      e.currentTarget.style.boxShadow = '0 0 12px var(--gold-glow)';
+                      e.currentTarget.style.transform = 'translateY(-2px)';
+                    }}
+                    onMouseOut={(e) => {
+                      e.currentTarget.style.borderColor = 'var(--border)';
+                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.style.transform = 'translateY(0)';
+                    }}
+                  >
+                    {item.emoji}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setPromotionPending(null)}
+                className="btn btn-sm"
+                style={{
+                  marginTop: '1.5rem',
+                  background: 'transparent',
+                  border: '1px solid rgba(248, 113, 113, 0.3)',
+                  color: 'var(--danger)'
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Move navigation controls */}

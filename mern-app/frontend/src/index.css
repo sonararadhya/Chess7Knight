@@ -218,6 +218,7 @@ select.form-control {
 @media (max-width: 960px) { .game-container { grid-template-columns: 1fr; } }
 
 .board-wrapper {
+  position: relative;
   aspect-ratio: 1; width: 100%;
   max-width: min(580px, calc(100vw - 40px));
   margin: 0 auto; border-radius: var(--radius-md); overflow: hidden;

@@ -66,7 +66,13 @@ F_TITLE = _font(19, bold=True)
 # ──────────────────────────────────────────────────────────────
 #  ENGINE
 # ──────────────────────────────────────────────────────────────
-engine = chess.engine.SimpleEngine.popen_uci("/usr/games/stockfish")
+from stockfish_wrapper import locate_stockfish
+stockfish_path = locate_stockfish()
+if not stockfish_path:
+    print("CRITICAL ERROR: Stockfish binary not found!")
+    sys.exit(1)
+engine = chess.engine.SimpleEngine.popen_uci(stockfish_path)
+
 
 def _cleanup():
     try: engine.quit()
@@ -651,7 +657,7 @@ def draw_game_over(result_str):
         [f"Accuracy: {move_accuracy:.1f}%",
          f"Rating:   {player_rating}",
          f"Moves:    {len(san_history)}"],
-        sub="R = New Game   M = Main Menu   Q = Quit")
+        sub="V = Review   R = New Game   M = Main Menu   Q = Quit")
 
 def confirm_dialog(question):
     """Blocking yes/no. Returns True for yes."""
@@ -1139,6 +1145,8 @@ def game_loop():
                     return "menu"
                 if e.key == pygame.K_r:
                     reset_game(); game_over = False; result_str = ""
+                if e.key == pygame.K_v and game_over:
+                    return "review"
                 if e.key == pygame.K_u and not game_over:
                     # undo 2 plies (player + AI)
                     n = min(2, len(move_history))
@@ -1240,6 +1248,15 @@ while True:
         elif step == "game":
             reset_game()
             ret = game_loop()
-            step = "__main"    # after game always back to main
+            if ret == "review":
+                step = "review"
+            else:
+                step = "__main__"
+        elif step == "review":
+            from review_screen import GameReviewUI
+            moves_copy = list(move_history)
+            review_ui = GameReviewUI(screen, moves_copy, None, level_idx, IMAGES, T())
+            review_ui.run_screen()
+            step = "__main__"
         else:
             break

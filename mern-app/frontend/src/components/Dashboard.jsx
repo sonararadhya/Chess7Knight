@@ -1,29 +1,57 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useTheme } from '../contexts/ThemeContext';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 const Dashboard = ({ user }) => {
   const { t } = useLanguage();
+  const { themeId, setThemeId, pieceSetId, setPieceSetId, allThemes, allPieceSets } = useTheme();
+  const navigate = useNavigate();
+
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => { if (user) fetchHistory(); }, [user]);
+  useEffect(() => {
+    fetchHistory();
+  }, [user]);
 
   const fetchHistory = async () => {
-    const token = localStorage.getItem('token');
-    if (!token) return;
     setLoading(true);
+    let localMatches = [];
     try {
-      const res = await axios.get(`${API_URL}/matches/history`, { headers: { 'x-auth-token': token } });
-      setHistory(res.data);
-    } catch (err) { console.error('Error fetching history', err); }
-    finally { setLoading(false); }
+      localMatches = JSON.parse(localStorage.getItem('chess7k_match_history') || '[]');
+    } catch (e) {}
+
+    const token = localStorage.getItem('token');
+    if (token && user) {
+      try {
+        const res = await axios.get(`${API_URL}/matches/history`, { headers: { 'x-auth-token': token } });
+        const apiMatches = res.data || [];
+        const map = new Map();
+        [...apiMatches, ...localMatches].forEach(m => {
+          const key = m._id || m.id || m.date;
+          if (!map.has(key)) map.set(key, m);
+        });
+        const merged = Array.from(map.values()).sort((a, b) => new Date(b.date) - new Date(a.date));
+        setHistory(merged);
+      } catch (err) {
+        setHistory(localMatches);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setHistory(localMatches);
+      setLoading(false);
+    }
   };
 
-  // Only keep Play, Puzzles, Learn, and Practice cards (remove Profile)
+  const handleLaunchReview = (match) => {
+    navigate('/play', { state: { reviewMatch: match } });
+  };
+
   const features = [
     { to: '/play', icon: '♟', title: t('play'), desc: t('play_desc'), gradient: 'linear-gradient(135deg, rgba(79,140,255,0.12), rgba(155,109,255,0.06))', border: 'rgba(79,140,255,0.2)' },
     { to: '/puzzles', icon: '🧩', title: t('puzzles'), desc: t('puzzles_desc'), gradient: 'linear-gradient(135deg, rgba(155,109,255,0.12), rgba(79,140,255,0.06))', border: 'rgba(155,109,255,0.2)' },
@@ -34,8 +62,8 @@ const Dashboard = ({ user }) => {
   return (
     <div className="fade-in" style={{ maxWidth: '960px', margin: '2rem auto' }}>
 
-      {/* Hero */}
-      <div className="glass-panel" style={{ textAlign: 'center', padding: 'clamp(2.5rem, 5vw, 4.5rem) 2rem clamp(2rem, 4vw, 3.5rem)', marginBottom: '1.5rem', position: 'relative', overflow: 'hidden' }}>
+      {/* Hero Header */}
+      <div className="glass-panel" style={{ textAlign: 'center', padding: 'clamp(2.5rem, 5vw, 4rem) 2rem clamp(2rem, 4vw, 3rem)', marginBottom: '1.5rem', position: 'relative', overflow: 'hidden' }}>
         <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '16rem', opacity: 0.03, userSelect: 'none', pointerEvents: 'none', lineHeight: 1, color: 'var(--gold)' }}>♛</div>
         <div style={{ position: 'absolute', top: '-20%', right: '-10%', width: '300px', height: '300px', background: 'radial-gradient(circle, rgba(201,162,39,0.08), transparent 70%)', pointerEvents: 'none' }} />
 
@@ -50,15 +78,42 @@ const Dashboard = ({ user }) => {
           </div>
         )}
 
-        {!user && (
-          <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '2rem', flexWrap: 'wrap' }}>
-            <Link to="/play" className="btn btn-gold btn-lg">♟ {t('quick_play')}</Link>
-            <Link to="/register" className="btn btn-secondary btn-lg">{t('signup')}</Link>
-          </div>
-        )}
+        <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '2rem', flexWrap: 'wrap' }}>
+          <Link to="/play" className="btn btn-gold btn-lg">♟ {t('quick_play')}</Link>
+          {!user && <Link to="/register" className="btn btn-secondary btn-lg">{t('signup')}</Link>}
+        </div>
       </div>
 
-      {/* Feature cards */}
+      {/* Quick Theme & Piece Set Customizer Bar */}
+      <div className="glass-panel" style={{ marginBottom: '1.5rem', padding: '1rem 1.5rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '1.2rem' }}>🎨</span>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '600' }}>Board Theme</label>
+              <select value={themeId} onChange={e => setThemeId(e.target.value)} className="form-control" style={{ padding: '6px 10px', fontSize: '0.85rem' }}>
+                {Object.entries(allThemes).map(([id, th]) => (
+                  <option key={id} value={id}>{th.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <span style={{ fontSize: '1.2rem' }}>♛</span>
+            <div style={{ flex: 1 }}>
+              <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: '600' }}>Chess Piece Set</label>
+              <select value={pieceSetId} onChange={e => setPieceSetId(e.target.value)} className="form-control" style={{ padding: '6px 10px', fontSize: '0.85rem' }}>
+                {Object.entries(allPieceSets).map(([id, ps]) => (
+                  <option key={id} value={id}>{ps.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Feature Navigation Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
         {features.map(({ to, icon, title, desc, gradient, border }) => (
           <Link key={to} to={to} className="feature-card" style={{ background: gradient, borderColor: border }}>
@@ -69,56 +124,61 @@ const Dashboard = ({ user }) => {
         ))}
       </div>
 
-      {/* Game history of player below the cards */}
-      {user && (
-        <div className="glass-panel">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border)' }}>
-            <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>📋 {t('recent_matches')}</h3>
-            <Link to="/profile" style={{ fontSize: '0.85rem', color: 'var(--gold)', textDecoration: 'none', fontWeight: '600' }}>View Profile →</Link>
-          </div>
-
-          {loading ? (
-            <div style={{ textAlign: 'center', padding: '2rem' }}>
-              <div className="spinner" style={{ margin: '0 auto 1rem' }} /> Loading…
-            </div>
-          ) : history.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '2.5rem' }}>
-              <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>♟</div>
-              <p>{t('no_matches')}</p>
-              <Link to="/play" className="btn btn-sm" style={{ marginTop: '1rem' }}>{t('start_playing')}</Link>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              {history.slice(0, 5).map((match, i) => (
-                <div key={match._id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
-                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
-                      {new Date(match.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                    </span>
-                    <span style={{ fontWeight: '500', fontSize: '0.88rem' }}>
-                      🤖 Bot ELO {match.difficulty || 1200}
-                    </span>
-                    {match.openingName && (
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'inline-block' }} className="desktop-only">
-                        • {match.openingName}
-                      </span>
-                    )}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                    <span className={`badge ${match.result === '1-0' ? 'badge-win' : match.result === '0-1' ? 'badge-loss' : 'badge-draw'}`}>
-                      {match.result === '1-0' ? '✓ Win' : match.result === '0-1' ? '✗ Loss' : '= Draw'}
-                    </span>
-                    <span style={{ color: (match.accuracy || 0) >= 90 ? 'var(--success)' : (match.accuracy || 0) >= 75 ? 'var(--warning)' : 'var(--danger)', fontWeight: '600', fontFamily: 'var(--font-mono)', fontSize: '0.88rem' }}>
-                      {match.accuracy || 0}%
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+      {/* Recent Match History Section */}
+      <div className="glass-panel">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border)' }}>
+          <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>📋 {t('recent_matches')}</h3>
+          <Link to="/profile" style={{ fontSize: '0.85rem', color: 'var(--gold)', textDecoration: 'none', fontWeight: '600' }}>View Profile & All History →</Link>
         </div>
-      )}
+
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '2rem' }}>
+            <div className="spinner" style={{ margin: '0 auto 1rem' }} /> Loading…
+          </div>
+        ) : history.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '2.5rem' }}>
+            <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>♟</div>
+            <p>{t('no_matches')}</p>
+            <Link to="/play" className="btn btn-gold btn-sm" style={{ marginTop: '1rem' }}>{t('start_playing')}</Link>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {history.slice(0, 5).map((match, i) => (
+              <div key={match._id || match.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                    {new Date(match.date || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                  </span>
+                  <span style={{ fontWeight: '500', fontSize: '0.88rem' }}>
+                    🤖 Bot ELO {match.difficulty || 1200}
+                  </span>
+                  {match.openingName && (
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }} className="desktop-only">
+                      • {match.openingName}
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                  <span className={`badge ${match.result === '1-0' ? 'badge-win' : match.result === '0-1' ? 'badge-loss' : 'badge-draw'}`}>
+                    {match.result === '1-0' ? '✓ Win' : match.result === '0-1' ? '✗ Loss' : '= Draw'}
+                  </span>
+                  <span style={{ color: (match.accuracy || 0) >= 90 ? 'var(--success)' : (match.accuracy || 0) >= 75 ? 'var(--warning)' : 'var(--danger)', fontWeight: '600', fontFamily: 'var(--font-mono)', fontSize: '0.88rem' }}>
+                    {match.accuracy || 0}%
+                  </span>
+                  <button
+                    onClick={() => handleLaunchReview(match)}
+                    className="btn btn-gold btn-sm"
+                    style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                  >
+                    🔍 Review
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 };

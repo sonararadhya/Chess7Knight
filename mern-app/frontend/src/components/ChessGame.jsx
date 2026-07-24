@@ -1,9 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Chess } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
+import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { getCustomPieces } from '../utils/pieceSets';
+import { soundFx } from '../utils/audio';
+import { generateIndustryGameReview } from '../utils/reviewEngine';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -24,165 +28,6 @@ const TIME_CONTROLS = [
   { label: 'No Limit', value: 0, group: 'Long' },
 ];
 
-const generateMoveReview = (movesList) => {
-  const review = [];
-  const tempGame = new Chess();
-  const valMap = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
-  
-  movesList.forEach((move, index) => {
-    const from = move.from;
-    const to = move.to;
-    const san = move.san;
-    const color = move.color;
-    
-    // Previous FEN
-    const prevFen = tempGame.fen();
-    
-    // Make move on temp game
-    tempGame.move(move);
-    const fenAfter = tempGame.fen();
-    
-    let classification = 'good';
-    let commentary = '';
-    let bestMove = '';
-    let scoreAfter = '';
-    
-    const moveNumber = Math.floor(index / 2) + 1;
-    
-    // 1. Check Book Moves
-    if (moveNumber <= 4) {
-      const bookMoves = ['e4', 'e5', 'Nf3', 'Nc6', 'Bc4', 'Bc5', 'd4', 'd5', 'c4', 'Nf6', 'c5', 'e6', 'c6', 'd6', 'g3', 'Nf3'];
-      if (bookMoves.includes(san)) {
-        classification = 'book';
-        commentary = `Book Move: Standard opening theory. Developing pieces and staking a claim in the center.`;
-      }
-    }
-    
-    // 2. Check Checkmate / Checks
-    if (tempGame.isCheckmate()) {
-      classification = 'brilliant';
-      commentary = `Brilliant! A decisive blow. You delivered checkmate and won the game immediately!`;
-    } else if (tempGame.inCheck()) {
-      classification = 'best';
-      commentary = `Best Move: Checks the opponent's king, forcing defensive action and taking the initiative.`;
-    } 
-    // 3. Captures
-    else if (move.captured) {
-      const capVal = valMap[move.captured] || 0;
-      const pieceVal = valMap[move.piece] || 0;
-      if (capVal > pieceVal) {
-        classification = 'great';
-        commentary = `Great Move: Capture of a higher-value ${move.captured.toUpperCase()} with your ${move.piece.toUpperCase()} wins material!`;
-      } else if (capVal === pieceVal) {
-        classification = 'best';
-        commentary = `Best Move: Even exchange of pieces to maintain the balance of the position.`;
-      } else {
-        classification = 'excellent';
-        commentary = `Excellent: Tactical exchange that improves your control over key files or squares.`;
-      }
-    } 
-    // 4. Position-based rule analysis
-    else {
-      // Check if moving to a square where it can be captured next move by opponent for free
-      const oppGame = new Chess(fenAfter);
-      const oppMoves = oppGame.moves({ verbose: true });
-      const freeCapture = oppMoves.find(m => m.captured && m.to === to);
-      
-      if (freeCapture) {
-        // Can we recapture?
-        oppGame.move(freeCapture);
-        const recaptured = oppGame.moves({ verbose: true }).find(m => m.to === to);
-        if (!recaptured) {
-          classification = 'blunder';
-          commentary = `Blunder: Moving your ${move.piece.toUpperCase()} to ${to} leaves it completely unprotected and open to free capture.`;
-          // Find a safer move
-          const prevGame = new Chess(prevFen);
-          const legal = prevGame.moves({ verbose: true });
-          const safe = legal.find(m => m.from !== from && !prevGame.get(m.to));
-          bestMove = safe ? safe.san : 'Piece safety';
-        } else {
-          // If we can recapture but it's a bad trade
-          const pieceVal = valMap[move.piece] || 1;
-          const capturerVal = valMap[freeCapture.piece] || 1;
-          if (pieceVal > capturerVal) {
-            classification = 'mistake';
-            commentary = `Mistake: Moving your ${move.piece.toUpperCase()} to ${to} leads to a bad trade losing material.`;
-            const prevGame = new Chess(prevFen);
-            const legal = prevGame.moves({ verbose: true });
-            const safe = legal.find(m => m.from !== from);
-            bestMove = safe ? safe.san : 'Developing move';
-          }
-        }
-      }
-    }
-    
-    // Fallbacks and default classifications
-    if (classification === 'good') {
-      const centerSquares = ['d4', 'd5', 'e4', 'e5', 'c4', 'c5', 'f4', 'f5'];
-      if (centerSquares.includes(to)) {
-        classification = 'best';
-        commentary = `Best Move: Controls the center of the board, restricting the opponent's pieces.`;
-      } else if (move.piece === 'n' || move.piece === 'b') {
-        classification = 'excellent';
-        commentary = `Excellent: Actively developing minor pieces to build pressure and prepare for castling.`;
-      } else if (san === 'O-O' || san === 'O-O-O') {
-        classification = 'best';
-        commentary = `Best Move: Secures your king's safety and activates the rook on the open files.`;
-      } else {
-        const standardComments = [
-          "Good Move: Keeps position balanced and maintains pressure.",
-          "Good Move: Solid developing move improving piece coordination.",
-          "Good Move: Patient positional play waiting for opportunities."
-        ];
-        commentary = standardComments[index % standardComments.length];
-      }
-    }
-    
-    // Score After
-    const isWhite = color === 'w';
-    let scoreVal = 0.0;
-    if (index > 0) {
-      const prevScoreStr = review[index - 1].scoreAfter;
-      if (prevScoreStr.startsWith('#')) {
-        scoreAfter = prevScoreStr;
-      } else {
-        const prevScore = parseFloat(prevScoreStr) || 0.0;
-        const sign = isWhite ? 1 : -1;
-        if (classification === 'blunder') {
-          scoreVal = prevScore - sign * 3.5;
-        } else if (classification === 'mistake') {
-          scoreVal = prevScore - sign * 1.5;
-        } else if (classification === 'inaccuracy') {
-          scoreVal = prevScore - sign * 0.6;
-        } else if (classification === 'brilliant') {
-          scoreVal = prevScore + sign * 1.8;
-        } else if (classification === 'great' || classification === 'best') {
-          scoreVal = prevScore + sign * 0.3;
-        } else {
-          scoreVal = prevScore + sign * 0.05;
-        }
-        scoreAfter = (scoreVal > 0 ? '+' : '') + scoreVal.toFixed(1);
-      }
-    } else {
-      scoreAfter = isWhite ? '+0.3' : '-0.1';
-    }
-    
-    review.push({
-      san,
-      from,
-      to,
-      color,
-      classification,
-      commentary,
-      bestMove: bestMove || '',
-      scoreAfter,
-      fenAfter
-    });
-  });
-  
-  return review;
-};
-
 const moveCategories = [
   { key: 'brilliant', label: 'Brilliant', emoji: '💎', color: '#9b6dff' },
   { key: 'great', label: 'Great Move', emoji: '⭐', color: '#4f8cff' },
@@ -200,9 +45,24 @@ const getMoveCategoryInfo = (classification) => {
   return moveCategories.find(c => c.key === classification) || { label: 'Good', emoji: '👍', color: '#6b7280' };
 };
 
+// Helper for local storage match history persistence
+export const saveMatchToLocalStorage = (matchData) => {
+  try {
+    const existing = JSON.parse(localStorage.getItem('chess7k_match_history') || '[]');
+    const matchId = matchData._id || matchData.id || ('local_' + Date.now());
+    const itemToSave = { ...matchData, _id: matchId, id: matchId };
+    const updated = [itemToSave, ...existing.filter(m => (m._id || m.id) !== matchId)].slice(0, 50);
+    localStorage.setItem('chess7k_match_history', JSON.stringify(updated));
+  } catch (e) {
+    console.error('Error saving match to localStorage', e);
+  }
+};
+
 const ChessGame = ({ user }) => {
-  const { theme } = useTheme();
+  const { theme, themeId, setThemeId, pieceSetId, setPieceSetId, allThemes, allPieceSets, soundEnabled, setSoundEnabled } = useTheme();
   const { t } = useLanguage();
+  const location = useLocation();
+  const navigate = useNavigate();
 
   // Settings & Menu States
   const [gameState, setGameState] = useState('menu');
@@ -244,6 +104,72 @@ const ChessGame = ({ user }) => {
   const [reviewHistory, setReviewHistory] = useState([]);
   const [reviewIndex, setReviewIndex] = useState(0);
   const [isGameOverState, setIsGameOverState] = useState(false);
+  const [reviewFilter, setReviewFilter] = useState('all'); // 'all', 'mistakes', 'brilliant'
+  const [showPreventativeOnBoard, setShowPreventativeOnBoard] = useState(false);
+
+  // Custom Pieces renderer
+  const customPieces = useMemo(() => getCustomPieces(pieceSetId), [pieceSetId]);
+
+  // Handle external review launch (e.g. passed from Profile or Dashboard)
+  useEffect(() => {
+    if (location.state?.reviewMatch) {
+      const match = location.state.reviewMatch;
+      setAnalysisData(match);
+      if (match.reviewList) {
+        setReviewHistory(match.reviewList);
+        setReviewIndex(match.reviewList.length);
+      } else if (match.pgn) {
+        try {
+          const g = new Chess();
+          g.loadPgn(match.pgn);
+          const history = g.history({ verbose: true });
+          const rev = generateIndustryGameReview(history);
+          setReviewHistory(rev.reviewList);
+          setReviewIndex(rev.reviewList.length);
+        } catch (e) {}
+      }
+      setIsReviewMode(true);
+      setGameState('playing');
+    }
+  }, [location.state]);
+
+  // Material & Captured pieces calculator
+  const materialInfo = useMemo(() => {
+    const initial = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+    const current = { w: { p: 0, n: 0, b: 0, r: 0, q: 0 }, b: { p: 0, n: 0, b: 0, r: 0, q: 0 } };
+    
+    try {
+      const board = gameRef.current.board();
+      for (let r = 0; r < 8; r++) {
+        for (let c = 0; c < 8; c++) {
+          const p = board[r][c];
+          if (p) current[p.color][p.type]++;
+        }
+      }
+    } catch (e) {}
+
+    const symbols = { p: '♟', n: '♞', b: '♝', r: '♜', q: '♛' };
+    const vals = { p: 1, n: 3, b: 3, r: 5, q: 9 };
+    const capturedByWhite = [];
+    const capturedByBlack = [];
+
+    ['p', 'n', 'b', 'r', 'q'].forEach((t) => {
+      const bCap = Math.max(0, initial[t] - current.b[t]);
+      for (let i = 0; i < bCap; i++) capturedByWhite.push({ type: t, symbol: symbols[t], val: vals[t] });
+
+      const wCap = Math.max(0, initial[t] - current.w[t]);
+      for (let i = 0; i < wCap; i++) capturedByBlack.push({ type: t, symbol: symbols[t], val: vals[t] });
+    });
+
+    const wScore = capturedByWhite.reduce((s, p) => s + p.val, 0);
+    const bScore = capturedByBlack.reduce((s, p) => s + p.val, 0);
+
+    return {
+      capturedByWhite,
+      capturedByBlack,
+      diff: wScore - bScore
+    };
+  }, [fen]);
 
   // State Persistence keys
   const getPersistKeys = () => ({
@@ -259,7 +185,7 @@ const ChessGame = ({ user }) => {
     color: `chess7k_active_game_color`,
   });
 
-  // Calculate danger squares (squares attacked by the opponent)
+  // Calculate danger squares
   const calculateDangerSquares = useCallback(() => {
     if (!showDanger) {
       setDangerSquares({});
@@ -268,14 +194,12 @@ const ChessGame = ({ user }) => {
     try {
       const tempGame = new Chess(gameRef.current.fen());
       const tokens = tempGame.fen().split(' ');
-      // Swap turn to look from opponent's perspective
       tokens[1] = tokens[1] === 'w' ? 'b' : 'w';
-      const swappedFen = tokens.join(' ');
-      const oppGame = new Chess(swappedFen);
+      const oppGame = new Chess(tokens.join(' '));
       const moves = oppGame.moves({ verbose: true });
       const attacked = {};
       moves.forEach(m => {
-        attacked[m.to] = { boxShadow: 'inset 0 0 0 3px rgba(248, 113, 113, 0.45)' };
+        attacked[m.to] = { boxShadow: 'inset 0 0 0 3px rgba(248, 113, 113, 0.55)' };
       });
       setDangerSquares(attacked);
     } catch {
@@ -283,7 +207,7 @@ const ChessGame = ({ user }) => {
     }
   }, [showDanger, fen]);
 
-  // Tutor suggestions generator
+  // Tutor suggestions
   const generateTutorTip = useCallback(() => {
     if (!useTutor) {
       setTutorTip('');
@@ -291,25 +215,19 @@ const ChessGame = ({ user }) => {
     }
     const g = gameRef.current;
     if (g.isGameOver()) {
-      setTutorTip('The match is over!');
+      setTutorTip('The match has concluded!');
       return;
     }
     if (g.inCheck()) {
-      setTutorTip('⚠️ King in check! Find a move to escape, block, or capture the attacking piece.');
+      setTutorTip('⚠️ King in check! Escaping, blocking, or capturing the attacker is mandatory.');
       return;
     }
-
-    const turn = g.turn();
     const history = g.history();
-
-    // Opening phase suggestions
     if (history.length < 10) {
-      setTutorTip('🎯 Opening Stage: Focus on center pawns (e4/d4) and develop Knights before Bishops.');
+      setTutorTip('🎯 Opening Strategy: Stake claims in central squares (e4/d4) and develop minor pieces.');
       return;
     }
-
-    // Midgame tips
-    setTutorTip('💡 Strategy: Connect your rooks, control open files, and scan for tactical forks or pins.');
+    setTutorTip('💡 Midgame Tactics: Control open files with rooks, scan for pins, double attacks, or undefended pieces.');
   }, [useTutor, fen]);
 
   useEffect(() => {
@@ -317,8 +235,9 @@ const ChessGame = ({ user }) => {
     generateTutorTip();
   }, [fen, showDanger, useTutor, calculateDangerSquares, generateTutorTip]);
 
-  // ── 1. STATE PERSISTENCE (Restore Game Memory) ──
+  // Load Saved Game from Storage
   useEffect(() => {
+    if (location.state?.reviewMatch) return;
     const keys = getPersistKeys();
     const savedState = localStorage.getItem(keys.state);
     if (savedState === 'playing') {
@@ -353,7 +272,6 @@ const ChessGame = ({ user }) => {
           setPastFens(fens);
           setCurrentMoveIndex(fens.length - 1);
         } catch (e) {
-          console.error('Error reloading game state', e);
           gameRef.current = new Chess();
           const startFen = gameRef.current.fen();
           setFen(startFen);
@@ -364,9 +282,7 @@ const ChessGame = ({ user }) => {
 
       if (savedEloVal) setSelectedElo(parseInt(savedEloVal));
       if (savedTimeVal) {
-        try {
-          setSelectedTime(JSON.parse(savedTimeVal));
-        } catch {}
+        try { setSelectedTime(JSON.parse(savedTimeVal)); } catch {}
       }
       if (savedPlayerSec) setPlayerTime(parseInt(savedPlayerSec));
       if (savedBotSec) setBotTime(parseInt(savedBotSec));
@@ -376,7 +292,7 @@ const ChessGame = ({ user }) => {
 
       setGameState('playing');
     }
-  }, []);
+  }, [location.state]);
 
   const saveStateToStorage = useCallback((customStatus) => {
     if (gameState !== 'playing' || isGameOverState) return;
@@ -404,7 +320,7 @@ const ChessGame = ({ user }) => {
     }
   }, [fen, playerTime, botTime, gameState, isGameOverState, saveStateToStorage]);
 
-  // Responsive board size
+  // Responsive board width
   useEffect(() => {
     const updateSize = () => {
       setBoardWidth(Math.min(540, window.innerWidth - 40));
@@ -416,7 +332,7 @@ const ChessGame = ({ user }) => {
 
   // Timer Tick Interval
   useEffect(() => {
-    if (gameState !== 'playing' || selectedTime.value === 0 || isThinking || gameMode === 'local') {
+    if (gameState !== 'playing' || selectedTime.value === 0 || isThinking || gameMode === 'local' || isGameOverState) {
       if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
@@ -445,15 +361,14 @@ const ChessGame = ({ user }) => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [gameState, selectedTime, isThinking, gameMode, actualColor]);
+  }, [gameState, selectedTime, isThinking, gameMode, actualColor, isGameOverState]);
 
   const handleTimeout = (result) => {
     if (timerRef.current) clearInterval(timerRef.current);
     setIsGameOverState(true);
     const winner = result === '1-0' ? 'White' : 'Black';
-    const statusText = `⏱️ Timeout! ${winner} wins!`;
-    setStatus(statusText);
-    clearStorageGame();
+    setStatus(`⏱️ Timeout! ${winner} wins!`);
+    soundFx.playWin();
     saveMatch(result);
   };
 
@@ -464,91 +379,86 @@ const ChessGame = ({ user }) => {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
+  // ── SAVE MATCH & GENERATE REVIEW (Fixes Issue 1 & Issue 3) ──
   const saveMatch = async (result) => {
-    if (gameMode === 'local') {
-      // Local match outcome display
-      clearStorageGame();
-      const simMatch = {
-        result,
-        accuracy: 85,
-        difficulty: 1000,
-        timeControl: 'Local Play',
-        performanceRating: 1000,
-        openingName: 'Pass & Play Game',
-        phasePerformance: { opening: 90, middlegame: 80, endgame: 70 },
-        analysis: { brilliant: 0, great: 1, best: 10, excellent: 5, good: 3, book: 2, inaccuracy: 2, mistake: 1, miss: 0, blunder: 0 }
-      };
-      setAnalysisData(simMatch);
-      setShowAnalysis(true);
-      return;
-    }
+    if (timerRef.current) clearInterval(timerRef.current);
+    setIsGameOverState(true);
 
-    const token = localStorage.getItem('token');
-    const accuracyValue = Math.floor(Math.random() * 20) + 75; // 75-95%
-    
-    // Adjust result depending on if user played as black
+    const history = gameRef.current.history({ verbose: true });
+    const fullReview = generateIndustryGameReview(history);
+
     let normalizedResult = result;
     if (actualColor === 'black') {
-      if (result === '1-0') normalizedResult = '0-1'; // White won means User (Black) lost
-      else if (result === '0-1') normalizedResult = '1-0'; // Black won means User (Black) won
+      if (result === '1-0') normalizedResult = '0-1';
+      else if (result === '0-1') normalizedResult = '1-0';
     }
 
-    const postBody = {
+    const matchObj = {
+      _id: 'match_' + Date.now(),
+      id: 'match_' + Date.now(),
+      date: new Date().toISOString(),
       pgn: gameRef.current.pgn(),
       result: normalizedResult,
-      accuracy: accuracyValue,
+      accuracy: fullReview.accuracy,
       difficulty: selectedElo,
-      timeControl: selectedTime.label
+      timeControl: selectedTime.label,
+      analysis: fullReview.classificationsCount,
+      performanceRating: fullReview.performanceRating,
+      openingName: fullReview.openingName,
+      phasePerformance: fullReview.phasePerformance,
+      reviewList: fullReview.reviewList,
+      turningPoint: fullReview.turningPoint,
+      mode: gameMode
     };
 
+    saveMatchToLocalStorage(matchObj);
     clearStorageGame();
 
-    if (token) {
+    const token = localStorage.getItem('token');
+    if (token && gameMode !== 'local') {
       try {
+        const postBody = {
+          pgn: matchObj.pgn,
+          result: matchObj.result,
+          accuracy: matchObj.accuracy,
+          difficulty: matchObj.difficulty,
+          timeControl: matchObj.timeControl
+        };
         const res = await axios.post(`${API_URL}/matches/save`, postBody, {
           headers: { 'x-auth-token': token }
         });
-        setAnalysisData(res.data.match);
-        setShowAnalysis(true);
+
+        if (res.data?.match) {
+          const apiMatch = {
+            ...res.data.match,
+            reviewList: fullReview.reviewList,
+            turningPoint: fullReview.turningPoint
+          };
+          saveMatchToLocalStorage(apiMatch);
+          setAnalysisData(apiMatch);
+        } else {
+          setAnalysisData(matchObj);
+        }
       } catch (err) {
-        console.error('Error saving match', err);
+        console.error('Backend match save error, using local match fallback', err);
+        setAnalysisData(matchObj);
       }
     } else {
-      const movesCount = gameRef.current.history().length;
-      const simulatedMatch = {
-        result: normalizedResult,
-        accuracy: accuracyValue,
-        difficulty: selectedElo,
-        timeControl: selectedTime.label,
-        performanceRating: Math.floor(selectedElo * (accuracyValue / 100)) + (normalizedResult === '1-0' ? 150 : -150),
-        openingName: 'Italian Game',
-        phasePerformance: { opening: 90, middlegame: 80, endgame: movesCount > 20 ? 85 : 0 },
-        analysis: {
-          brilliant: Math.random() > 0.8 ? 1 : 0,
-          great: Math.floor(Math.random() * 2),
-          best: Math.floor(movesCount * 0.4),
-          excellent: Math.floor(movesCount * 0.2),
-          good: Math.floor(movesCount * 0.1),
-          book: 4,
-          inaccuracy: Math.floor(movesCount * 0.1),
-          mistake: Math.floor(movesCount * 0.05),
-          miss: Math.random() > 0.8 ? 1 : 0,
-          blunder: normalizedResult === '0-1' ? 1 : 0
-        }
-      };
-      setAnalysisData(simulatedMatch);
-      setShowAnalysis(true);
+      setAnalysisData(matchObj);
     }
+
+    // ALWAYS display analysis modal upon match completion!
+    setShowAnalysis(true);
   };
 
   const checkGameOver = useCallback((g) => {
     if (g.isGameOver()) {
       if (timerRef.current) clearInterval(timerRef.current);
       setIsGameOverState(true);
-      clearStorageGame();
       if (g.isCheckmate()) {
         const winner = g.turn() === 'w' ? 'Black' : 'White';
         setStatus(`♚ ${t('checkmate')}! ${winner} wins!`);
+        soundFx.playWin();
         saveMatch(g.turn() === 'w' ? '0-1' : '1-0');
       } else if (g.isDraw()) {
         setStatus(`½ ${t('draw')}!`);
@@ -558,6 +468,7 @@ const ChessGame = ({ user }) => {
     }
     if (g.inCheck()) {
       setStatus(`⚠️ ${t('check')}!`);
+      soundFx.playCheck();
     } else {
       setStatus(t('your_turn'));
     }
@@ -566,13 +477,9 @@ const ChessGame = ({ user }) => {
 
   const makeAMove = useCallback((move) => {
     try {
-      console.log('Attempting move:', move);
       const result = gameRef.current.move(move);
-      if (!result) {
-        console.warn('Move rejected by chess.js:', move);
-        return null;
-      }
-      console.log('Move successful. New FEN:', gameRef.current.fen());
+      if (!result) return null;
+
       const newFen = gameRef.current.fen();
       setFen(newFen);
       setPastFens(prev => {
@@ -586,6 +493,12 @@ const ChessGame = ({ user }) => {
       });
       setOptionSquares({});
       setMoveFrom(null);
+
+      // Play Sound Effects
+      if (gameRef.current.inCheck()) soundFx.playCheck();
+      else if (result.captured) soundFx.playCapture();
+      else soundFx.playMove();
+
       return result;
     } catch (error) {
       console.error('Error during makeAMove:', error, move);
@@ -620,7 +533,6 @@ const ChessGame = ({ user }) => {
         fallbackRandomMove();
       }
     } catch (err) {
-      console.error('Bot engine error:', err);
       fallbackRandomMove();
     } finally {
       setIsThinking(false);
@@ -671,8 +583,6 @@ const ChessGame = ({ user }) => {
     }
     
     const newSquares = {};
-    
-    // Glowing focus outline for active selection
     newSquares[square] = {
       boxShadow: '0 0 0 5px var(--gold), 0 0 20px var(--gold)',
       backgroundColor: 'rgba(201, 162, 39, 0.25)',
@@ -681,8 +591,6 @@ const ChessGame = ({ user }) => {
 
     moves.forEach((move) => {
       const isCapture = gameRef.current.get(move.to) && gameRef.current.get(move.to).color !== gameRef.current.get(square)?.color;
-      
-      // Target squares get outline highlight
       newSquares[move.to] = {
         boxShadow: isCapture 
           ? '0 0 0 5px var(--danger), 0 0 20px var(--danger)'
@@ -699,15 +607,11 @@ const ChessGame = ({ user }) => {
     return true;
   }, []);
 
-  // Click-to-move / Tap-to-move interaction
-  // react-chessboard v5 calls onSquareClick with an OBJECT: { piece, square }
   const onSquareClick = useCallback(({ square } = {}) => {
     if (isReviewMode || currentMoveIndex !== pastFens.length - 1) return;
     if (!square || isThinking || gameRef.current.isGameOver() || gameState !== 'playing') return;
 
     const turn = gameRef.current.turn();
-
-    // Verify turn ownership in bot mode
     if (gameMode === 'bot' && turn !== actualColor[0]) return;
 
     if (moveFrom) {
@@ -724,21 +628,13 @@ const ChessGame = ({ user }) => {
       const result = makeAMove({ from: moveFrom, to: square });
       if (result !== null) {
         checkGameOver(gameRef.current);
-        if (gameMode === 'bot') {
-          // Bot turn will auto-trigger via fen-change effect
-        }
         return;
       }
-      // If move failed, check if clicked square contains another of our own pieces to switch selection
       const clickedPiece = gameRef.current.get(square);
       if (clickedPiece && clickedPiece.color === turn) {
         const hasMoves = getMoveOptions(square);
-        if (hasMoves) {
-          setMoveFrom(square);
-        } else {
-          setMoveFrom(null);
-          setOptionSquares({});
-        }
+        if (hasMoves) setMoveFrom(square);
+        else { setMoveFrom(null); setOptionSquares({}); }
       } else {
         setMoveFrom(null);
         setOptionSquares({});
@@ -747,26 +643,19 @@ const ChessGame = ({ user }) => {
       const clickedPiece = gameRef.current.get(square);
       if (clickedPiece && clickedPiece.color === turn) {
         const hasMoves = getMoveOptions(square);
-        if (hasMoves) {
-          setMoveFrom(square);
-        }
+        if (hasMoves) setMoveFrom(square);
       }
     }
   }, [isReviewMode, currentMoveIndex, pastFens.length, isThinking, gameState, gameMode, actualColor, moveFrom, makeAMove, checkGameOver, getMoveOptions, checkIfPromotionMove]);
 
-  // Drag-and-drop interaction handler
-  // react-chessboard v5 calls onPieceDrop with an OBJECT: { piece, sourceSquare, targetSquare }
   const onPieceDrop = useCallback(({ sourceSquare, targetSquare } = {}) => {
     if (isReviewMode || currentMoveIndex !== pastFens.length - 1) return false;
     if (!sourceSquare || !targetSquare) return false;
     if (isThinking || gameRef.current.isGameOver() || gameState !== 'playing') return false;
 
     const turn = gameRef.current.turn();
-
-    // Verify turn ownership in bot mode
     if (gameMode === 'bot' && turn !== actualColor[0]) return false;
 
-    // Check if it's pawn promotion
     if (checkIfPromotionMove(sourceSquare, targetSquare)) {
       setPromotionPending({
         from: sourceSquare,
@@ -789,6 +678,7 @@ const ChessGame = ({ user }) => {
     return true;
   }, [isReviewMode, currentMoveIndex, pastFens.length, isThinking, gameState, gameMode, actualColor, makeAMove, checkGameOver, checkIfPromotionMove]);
 
+  // Custom Review styles (Highlighting moves + Preventative moves)
   const getReviewSquareStyles = useCallback(() => {
     if (!isReviewMode || reviewIndex === 0) return {};
     const move = reviewHistory[reviewIndex - 1];
@@ -797,14 +687,29 @@ const ChessGame = ({ user }) => {
     
     const styles = {};
     if (move.from && move.to) {
-      styles[move.from] = { backgroundColor: `${catInfo.color}33` }; // 20% opacity
+      styles[move.from] = { backgroundColor: `${catInfo.color}33` };
       styles[move.to] = { 
         backgroundColor: `${catInfo.color}44`,
         boxShadow: `inset 0 0 0 3px ${catInfo.color}`
       };
     }
+
+    // Highlight Preventative Move if toggled
+    if (showPreventativeOnBoard && move.bestMoveFrom && move.bestMoveTo) {
+      styles[move.bestMoveFrom] = {
+        boxShadow: '0 0 0 4px #34d399, 0 0 16px #34d399',
+        backgroundColor: 'rgba(52,211,153,0.3)',
+        borderRadius: '6px'
+      };
+      styles[move.bestMoveTo] = {
+        boxShadow: '0 0 0 4px #34d399, 0 0 16px #34d399',
+        backgroundColor: 'rgba(52,211,153,0.4)',
+        borderRadius: '6px'
+      };
+    }
+
     return styles;
-  }, [isReviewMode, reviewIndex, reviewHistory]);
+  }, [isReviewMode, reviewIndex, reviewHistory, showPreventativeOnBoard]);
 
   const jumpToMove = useCallback((index) => {
     if (index < 0 || index >= pastFens.length) return;
@@ -826,6 +731,7 @@ const ChessGame = ({ user }) => {
         : { ...moveSquares, ...optionSquares, ...dangerSquares },
       darkSquareStyle: { backgroundColor: theme.darkSquare },
       lightSquareStyle: { backgroundColor: theme.lightSquare },
+      customPieces: customPieces,
       canDragPiece: ({ square }) => {
         if (isReviewMode || currentMoveIndex !== pastFens.length - 1) return false;
         if (isThinking || gameRef.current.isGameOver()) return false;
@@ -849,12 +755,12 @@ const ChessGame = ({ user }) => {
     optionSquares,
     dangerSquares,
     theme,
+    customPieces,
     isThinking,
     actualColor,
     gameMode
   ]);
 
-  // Start a fresh game
   const resetGame = () => {
     gameRef.current = new Chess();
     setIsGameOverState(false);
@@ -873,22 +779,21 @@ const ChessGame = ({ user }) => {
     setIsReviewMode(false);
     setReviewHistory([]);
     setReviewIndex(0);
+    setShowPreventativeOnBoard(false);
     
-    // Choose actual color based on player preference
     let finalColor = playerColor;
     if (playerColor === 'random') {
       finalColor = Math.random() > 0.5 ? 'white' : 'black';
     }
     setActualColor(finalColor);
     
-    // Set Timers
     setPlayerTime(selectedTime.value);
     setBotTime(selectedTime.value);
     
     setStatus(t('your_turn'));
+    soundFx.playStart();
     setGameState('playing');
 
-    // Save initial state to storage
     localStorage.setItem('chess7k_active_game_state', 'playing');
     localStorage.setItem('chess7k_active_game_fen', gameRef.current.fen());
     localStorage.setItem('chess7k_active_game_pgn', gameRef.current.pgn());
@@ -904,16 +809,14 @@ const ChessGame = ({ user }) => {
   const handleResign = () => {
     if (timerRef.current) clearInterval(timerRef.current);
     setIsGameOverState(true);
-    setStatus('🏳️ You resigned. Match over.');
+    setStatus('🏳️ Resignation. Match over.');
     clearStorageGame();
     saveMatch('0-1');
   };
 
   const handleOfferDraw = () => {
     if (isThinking || gameRef.current.isGameOver()) return;
-    
-    // Calculate draw acceptance: 40% chance if ELO <= 1600 or equal position
-    const isAccepted = Math.random() > 0.6;
+    const isAccepted = Math.random() > 0.5;
     if (isAccepted) {
       if (timerRef.current) clearInterval(timerRef.current);
       setIsGameOverState(true);
@@ -929,7 +832,7 @@ const ChessGame = ({ user }) => {
   };
 
   const handleQuitOrAbandon = () => {
-    if (gameState === 'playing' && !gameRef.current.isGameOver()) {
+    if (gameState === 'playing' && !gameRef.current.isGameOver() && !isGameOverState) {
       setShowAbandonPrompt(true);
     } else {
       clearStorageGame();
@@ -942,14 +845,23 @@ const ChessGame = ({ user }) => {
     if (timerRef.current) clearInterval(timerRef.current);
     setIsGameOverState(true);
     clearStorageGame();
-    saveMatch('0-1'); // Counted as loss
+    saveMatch('0-1');
     setGameState('menu');
     setShowAbandonPrompt(false);
   };
 
-  // Bot Turn Trigger Effect — fires on every fen change AND on game/color state changes
+  const startInteractiveReview = () => {
+    const history = gameRef.current.history({ verbose: true });
+    const fullRev = generateIndustryGameReview(history);
+    setReviewHistory(fullRev.reviewList);
+    setReviewIndex(fullRev.reviewList.length);
+    setIsReviewMode(true);
+    setShowAnalysis(false);
+  };
+
+  // Bot Turn Trigger Effect
   useEffect(() => {
-    if (gameState === 'playing' && gameMode === 'bot' && !isThinking && !gameRef.current.isGameOver()) {
+    if (gameState === 'playing' && gameMode === 'bot' && !isThinking && !gameRef.current.isGameOver() && !isGameOverState) {
       const turn = gameRef.current.turn();
       const botColorChar = actualColor === 'white' ? 'b' : 'w';
       if (turn === botColorChar) {
@@ -957,19 +869,17 @@ const ChessGame = ({ user }) => {
         return () => clearTimeout(timer);
       }
     }
-  }, [fen, gameState, gameMode, isThinking, actualColor, makeBotMove]);
+  }, [fen, gameState, gameMode, isThinking, actualColor, makeBotMove, isGameOverState]);
 
-  // Separate effect: trigger bot move at game START when player chose Black
-  // (fen doesn't change on game start so the above effect won't fire)
+  // Initial bot move when player chooses Black
   useEffect(() => {
-    if (gameState === 'playing' && gameMode === 'bot' && actualColor === 'black' && !isThinking) {
-      const turn = gameRef.current.turn(); // Should be 'w' at game start
+    if (gameState === 'playing' && gameMode === 'bot' && actualColor === 'black' && !isThinking && !isGameOverState) {
+      const turn = gameRef.current.turn();
       if (turn === 'w') {
         const timer = setTimeout(makeBotMove, 600);
         return () => clearTimeout(timer);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameState, actualColor, gameMode]);
 
   // ── MENU VIEW ──
@@ -978,8 +888,7 @@ const ChessGame = ({ user }) => {
       <div className="fade-in" style={{ maxWidth: '640px', margin: '2rem auto' }}>
         <div className="glass-panel" style={{ padding: '2rem' }}>
           
-          {/* Game Mode Tab Header */}
-          <div className="tab-list" style={{ marginBottom: '2rem' }}>
+          <div className="tab-list" style={{ marginBottom: '1.5rem' }}>
             <button className={`tab-btn${gameMode === 'bot' ? ' active' : ''}`} style={{ flex: 1 }} onClick={() => setGameMode('bot')}>
               🤖 Play vs Bot
             </button>
@@ -988,15 +897,17 @@ const ChessGame = ({ user }) => {
             </button>
           </div>
 
-          <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-            <div style={{ fontSize: '4rem', marginBottom: '0.5rem', animation: 'float 3s ease-in-out infinite' }}>♞</div>
-            <h1>{gameMode === 'bot' ? 'Play vs Bot' : 'Local Multiplayer'}</h1>
-            <p>{gameMode === 'bot' ? 'Adjust ELO levels and time controls' : 'Pass and play on the same device'}</p>
+          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+            <div style={{ fontSize: '3.5rem', marginBottom: '0.25rem', animation: 'float 3s ease-in-out infinite' }}>♞</div>
+            <h2>{gameMode === 'bot' ? 'Play vs Bot' : 'Local Multiplayer'}</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+              {gameMode === 'bot' ? 'Select ELO difficulty, time control & piece design' : 'Pass and play on the same device'}
+            </p>
           </div>
 
-          {/* Color Selection (Choose Black or White) */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', fontWeight: '600' }}>
+          {/* Color Selection */}
+          <div style={{ marginBottom: '1.25rem' }}>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px', fontWeight: '600' }}>
               Choose Your Side
             </label>
             <div style={{ display: 'flex', gap: '8px' }}>
@@ -1011,7 +922,7 @@ const ChessGame = ({ user }) => {
                     key={key}
                     onClick={() => setPlayerColor(key)}
                     className={`btn btn-sm ${isSelected ? '' : 'btn-secondary'}`}
-                    style={{ flex: 1, padding: '10px', border: isSelected ? '1px solid var(--gold)' : undefined }}
+                    style={{ flex: 1, padding: '9px', border: isSelected ? '1px solid var(--gold)' : undefined }}
                   >
                     {label}
                   </button>
@@ -1020,10 +931,35 @@ const ChessGame = ({ user }) => {
             </div>
           </div>
 
-          {/* ELO Levels scrollable selection */}
+          {/* Theme & Piece Set Selector Cards */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px', fontWeight: '600' }}>
+                🎨 Board Theme
+              </label>
+              <select value={themeId} onChange={e => setThemeId(e.target.value)} className="form-control" style={{ fontSize: '0.85rem', padding: '8px' }}>
+                {Object.entries(allThemes).map(([id, th]) => (
+                  <option key={id} value={id}>{th.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px', fontWeight: '600' }}>
+                ♛ Piece Set Design
+              </label>
+              <select value={pieceSetId} onChange={e => setPieceSetId(e.target.value)} className="form-control" style={{ fontSize: '0.85rem', padding: '8px' }}>
+                {Object.entries(allPieceSets).map(([id, ps]) => (
+                  <option key={id} value={id}>{ps.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* ELO Levels */}
           {gameMode === 'bot' && (
-            <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', fontWeight: '600' }}>
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px', fontWeight: '600' }}>
                 Select Opponent ELO ({selectedElo})
               </label>
               <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', padding: '4px 2px', scrollbarWidth: 'thin' }}>
@@ -1034,7 +970,7 @@ const ChessGame = ({ user }) => {
                       key={elo}
                       onClick={() => setSelectedElo(elo)}
                       className={`btn btn-sm ${isSelected ? '' : 'btn-secondary'}`}
-                      style={{ flexShrink: 0, padding: '8px 14px', border: isSelected ? '1px solid var(--gold)' : undefined }}
+                      style={{ flexShrink: 0, padding: '7px 12px', border: isSelected ? '1px solid var(--gold)' : undefined }}
                     >
                       {elo}
                     </button>
@@ -1044,12 +980,12 @@ const ChessGame = ({ user }) => {
             </div>
           )}
 
-          {/* Time Controls selection */}
-          <div style={{ marginBottom: '2rem' }}>
-            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', fontWeight: '600' }}>
+          {/* Time Controls */}
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px', fontWeight: '600' }}>
               Time Control
             </label>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '8px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '6px' }}>
               {TIME_CONTROLS.map((tc) => {
                 const isSelected = selectedTime.label === tc.label;
                 return (
@@ -1084,66 +1020,63 @@ const ChessGame = ({ user }) => {
   const opponentLabel = gameMode === 'bot' ? `Bot ELO ${selectedElo}` : 'Local Opponent';
   const playerLabel = gameMode === 'bot' ? (user ? user.email.split('@')[0] : 'Guest') : 'Local Player';
 
-  const startInteractiveReview = () => {
-    const history = gameRef.current.history({ verbose: true });
-    const analyzed = generateMoveReview(history);
-    setReviewHistory(analyzed);
-    setReviewIndex(analyzed.length);
-    setIsReviewMode(true);
-    setShowAnalysis(false);
-  };
+  // Filtered review moves
+  const filteredReviewList = reviewHistory.filter((m) => {
+    if (reviewFilter === 'mistakes') return ['blunder', 'mistake', 'inaccuracy', 'miss'].includes(m.classification);
+    if (reviewFilter === 'brilliant') return ['brilliant', 'great', 'best'].includes(m.classification);
+    return true;
+  });
 
   return (
     <div className="game-container fade-in">
-      {/* Game board & labels */}
       <div>
-        {/* Top/Opponent Panel */}
+        {/* Top / Opponent Header with Captured Pieces */}
         <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <div style={{ width: '36px', height: '36px', background: 'rgba(15,21,37,0.8)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', border: '1px solid var(--border)' }}>
               {gameMode === 'bot' ? '🤖' : '👤'}
             </div>
             <div>
-              <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>{opponentLabel}</div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                {actualColor === 'white' ? 'Black Pieces' : 'White Pieces'}
+              <div style={{ fontWeight: '600', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {opponentLabel}
+                {actualColor === 'white' ? (
+                  materialInfo.diff < 0 && <span style={{ fontSize: '0.75rem', color: 'var(--gold)', fontWeight: '700' }}>+{Math.abs(materialInfo.diff)}</span>
+                ) : (
+                  materialInfo.diff > 0 && <span style={{ fontSize: '0.75rem', color: 'var(--gold)', fontWeight: '700' }}>+{materialInfo.diff}</span>
+                )}
+              </div>
+              {/* Captured pieces taken by opponent */}
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', gap: '2px', flexWrap: 'wrap' }}>
+                {actualColor === 'white' 
+                  ? materialInfo.capturedByBlack.map((p, idx) => <span key={idx}>{p.symbol}</span>)
+                  : materialInfo.capturedByWhite.map((p, idx) => <span key={idx}>{p.symbol}</span>)}
               </div>
             </div>
             {isThinking && <div className="spinner" />}
           </div>
           
-          {/* Top Timer */}
           {selectedTime.value > 0 && gameMode === 'bot' && (
-            <div style={{ fontSize: '1.25rem', fontWeight: '700', fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.05)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
-              ⏱️ {formatTime(botTime)}
+            <div style={{ fontSize: '1.2rem', fontWeight: '700', fontFamily: 'var(--font-mono)', background: 'rgba(255,255,255,0.05)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)' }}>
+              ⏱️ {formatTime(actualColor === 'white' ? botTime : playerTime)}
             </div>
           )}
         </div>
 
-        {/* Board wrapper (supports both click and drag-and-drop) */}
+        {/* Chessboard */}
         <div className="board-wrapper">
-          <Chessboard
-            key={actualColor}
-            options={chessboardOptions}
-          />
+          <Chessboard options={chessboardOptions} />
+          
+          {/* Promotion Modal Overlay */}
           {promotionPending && (
             <div style={{
-              position: 'absolute',
-              inset: 0,
-              background: 'rgba(10, 14, 26, 0.9)',
-              backdropFilter: 'blur(8px)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 100,
-              borderRadius: '8px',
-              animation: 'fadeIn 0.2s ease-out'
+              position: 'absolute', inset: 0, background: 'rgba(10, 14, 26, 0.92)',
+              backdropFilter: 'blur(8px)', display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', zIndex: 100, borderRadius: '8px'
             }}>
-              <h4 style={{ color: '#fff', marginBottom: '1.2rem', fontWeight: '700', letterSpacing: '0.05em', textTransform: 'uppercase', fontSize: '0.9rem' }}>
+              <h4 style={{ color: '#fff', marginBottom: '1rem', fontWeight: '700', textTransform: 'uppercase', fontSize: '0.85rem' }}>
                 Select Promotion Piece
               </h4>
-              <div style={{ display: 'flex', gap: '14px' }}>
+              <div style={{ display: 'flex', gap: '12px' }}>
                 {[
                   { key: 'q', label: 'Queen', emoji: promotionPending.color === 'w' ? '♕' : '♛' },
                   { key: 'r', label: 'Rook', emoji: promotionPending.color === 'w' ? '♖' : '♜' },
@@ -1154,159 +1087,74 @@ const ChessGame = ({ user }) => {
                     key={item.key}
                     onClick={() => handleSelectPromotion(item.key)}
                     className="btn btn-secondary"
-                    style={{
-                      width: '64px',
-                      height: '64px',
-                      fontSize: '2rem',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      padding: 0,
-                      borderRadius: '12px',
-                      border: '1px solid var(--border)',
-                      background: 'rgba(255, 255, 255, 0.03)',
-                      transition: 'all 0.2s'
-                    }}
-                    onMouseOver={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--gold)';
-                      e.currentTarget.style.boxShadow = '0 0 12px var(--gold-glow)';
-                      e.currentTarget.style.transform = 'translateY(-2px)';
-                    }}
-                    onMouseOut={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--border)';
-                      e.currentTarget.style.boxShadow = 'none';
-                      e.currentTarget.style.transform = 'translateY(0)';
-                    }}
+                    style={{ width: '60px', height: '60px', fontSize: '2rem', padding: 0 }}
                   >
                     {item.emoji}
                   </button>
                 ))}
               </div>
-              <button
-                onClick={() => setPromotionPending(null)}
-                className="btn btn-sm"
-                style={{
-                  marginTop: '1.5rem',
-                  background: 'transparent',
-                  border: '1px solid rgba(248, 113, 113, 0.3)',
-                  color: 'var(--danger)'
-                }}
-              >
-                Cancel
-              </button>
             </div>
           )}
         </div>
 
-        {/* Move navigation controls */}
+        {/* Board Move Navigation */}
         {!isReviewMode && (
           <div className="navigation-controls" style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '0.8rem' }}>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ minWidth: '40px', fontWeight: 'bold' }}
-              onClick={() => jumpToMove(0)}
-              disabled={currentMoveIndex === 0}
-              title="Start"
-            >
-              «
-            </button>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ padding: '6px 14px', fontWeight: 'bold' }}
-              onClick={() => jumpToMove(currentMoveIndex - 1)}
-              disabled={currentMoveIndex === 0}
-            >
-              ‹ Prev
-            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => jumpToMove(0)} disabled={currentMoveIndex === 0}>«</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => jumpToMove(currentMoveIndex - 1)} disabled={currentMoveIndex === 0}>‹ Prev</button>
             <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
               Move {currentMoveIndex} / {pastFens.length - 1}
             </span>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ padding: '6px 14px', fontWeight: 'bold' }}
-              onClick={() => jumpToMove(currentMoveIndex + 1)}
-              disabled={currentMoveIndex === pastFens.length - 1}
-            >
-              Next ›
-            </button>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ minWidth: '40px', fontWeight: 'bold' }}
-              onClick={() => jumpToMove(pastFens.length - 1)}
-              disabled={currentMoveIndex === pastFens.length - 1}
-              title="End"
-            >
-              »
-            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => jumpToMove(currentMoveIndex + 1)} disabled={currentMoveIndex === pastFens.length - 1}>Next ›</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => jumpToMove(pastFens.length - 1)} disabled={currentMoveIndex === pastFens.length - 1}>»</button>
           </div>
         )}
 
         {isReviewMode && (
           <div className="navigation-controls" style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '0.8rem' }}>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ minWidth: '40px', fontWeight: 'bold' }}
-              onClick={() => setReviewIndex(0)}
-              disabled={reviewIndex === 0}
-              title="Start"
-            >
-              «
-            </button>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ padding: '6px 14px', fontWeight: 'bold' }}
-              onClick={() => setReviewIndex(prev => Math.max(0, prev - 1))}
-              disabled={reviewIndex === 0}
-            >
-              ‹ Prev
-            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setReviewIndex(0)} disabled={reviewIndex === 0}>«</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setReviewIndex(prev => Math.max(0, prev - 1))} disabled={reviewIndex === 0}>‹ Prev</button>
             <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              Move {reviewIndex} / {reviewHistory.length}
+              Review {reviewIndex} / {reviewHistory.length}
             </span>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ padding: '6px 14px', fontWeight: 'bold' }}
-              onClick={() => setReviewIndex(prev => Math.min(reviewHistory.length, prev + 1))}
-              disabled={reviewIndex === reviewHistory.length}
-            >
-              Next ›
-            </button>
-            <button
-              className="btn btn-secondary btn-sm"
-              style={{ minWidth: '40px', fontWeight: 'bold' }}
-              onClick={() => setReviewIndex(reviewHistory.length)}
-              disabled={reviewIndex === reviewHistory.length}
-              title="End"
-            >
-              »
-            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setReviewIndex(prev => Math.min(reviewHistory.length, prev + 1))} disabled={reviewIndex === reviewHistory.length}>Next ›</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setReviewIndex(reviewHistory.length)} disabled={reviewIndex === reviewHistory.length}>»</button>
           </div>
         )}
 
-        {/* Bottom/Player Panel */}
+        {/* Bottom / Player Header with Captured Pieces */}
         <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginTop: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <div style={{ width: '36px', height: '36px', background: 'linear-gradient(135deg, var(--accent), var(--purple))', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>👤</div>
             <div>
-              <div style={{ fontWeight: '600', fontSize: '0.9rem' }}>{playerLabel}</div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                {actualColor === 'white' ? 'White Pieces' : 'Black Pieces'}
+              <div style={{ fontWeight: '600', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {playerLabel}
+                {actualColor === 'white' ? (
+                  materialInfo.diff > 0 && <span style={{ fontSize: '0.75rem', color: 'var(--gold)', fontWeight: '700' }}>+{materialInfo.diff}</span>
+                ) : (
+                  materialInfo.diff < 0 && <span style={{ fontSize: '0.75rem', color: 'var(--gold)', fontWeight: '700' }}>+{Math.abs(materialInfo.diff)}</span>
+                )}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', gap: '2px', flexWrap: 'wrap' }}>
+                {actualColor === 'white'
+                  ? materialInfo.capturedByWhite.map((p, idx) => <span key={idx}>{p.symbol}</span>)
+                  : materialInfo.capturedByBlack.map((p, idx) => <span key={idx}>{p.symbol}</span>)}
               </div>
             </div>
           </div>
           
-          {/* Bottom Timer */}
           {selectedTime.value > 0 && gameMode === 'bot' && (
-            <div style={{ fontSize: '1.25rem', fontWeight: '700', fontFamily: 'var(--font-mono)', background: 'rgba(79,140,255,0.1)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--accent)' }}>
-              ⏱️ {formatTime(playerTime)}
+            <div style={{ fontSize: '1.2rem', fontWeight: '700', fontFamily: 'var(--font-mono)', background: 'rgba(79,140,255,0.1)', padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--accent)' }}>
+              ⏱️ {formatTime(actualColor === 'white' ? playerTime : botTime)}
             </div>
           )}
         </div>
       </div>
 
-      {/* Sidebar Controls */}
+      {/* Sidebar Controls Panel */}
       <div className="controls-panel">
         {isReviewMode ? (
+          /* ── DETAILED INTERACTIVE REVIEW SIDEBAR (Fixes Issue 3) ── */
           <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '440px', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button className="btn btn-secondary btn-sm" onClick={() => setIsReviewMode(false)}>
@@ -1317,8 +1165,8 @@ const ChessGame = ({ user }) => {
               </span>
             </div>
 
-            {/* Performance ELO & Accuracy */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '6px' }}>
+            {/* Performance Rating & Accuracy Header */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <div style={{ padding: '6px', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--border)', textAlign: 'center' }}>
                 <div style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--gold)', fontFamily: 'var(--font-mono)' }}>
                   {analysisData?.accuracy || 85}%
@@ -1329,17 +1177,42 @@ const ChessGame = ({ user }) => {
                 <div style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
                   {analysisData?.performanceRating || 1200}
                 </div>
-                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Rating</div>
+                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Performance Rating</div>
               </div>
             </div>
 
-            {/* Current Selected Move Details */}
-            <div style={{ padding: '10px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '6px', minHeight: '130px' }}>
+            {/* Turning Point Alert Banner if available */}
+            {analysisData?.turningPoint && (
+              <div style={{ padding: '8px 10px', background: 'rgba(248,113,113,0.08)', borderLeft: '3px solid var(--danger)', borderRadius: '0 6px 6px 0', fontSize: '0.75rem', lineHeight: 1.4 }}>
+                <strong>⚡ Key Turning Point:</strong> Move {analysisData.turningPoint.moveNum} ({analysisData.turningPoint.player}) — {analysisData.turningPoint.san} ({analysisData.turningPoint.classification})
+              </div>
+            )}
+
+            {/* Filter Tabs */}
+            <div style={{ display: 'flex', gap: '4px', background: 'rgba(0,0,0,0.2)', padding: '2px', borderRadius: '6px' }}>
+              {[
+                { key: 'all', label: 'All Moves' },
+                { key: 'mistakes', label: 'Blunders' },
+                { key: 'brilliant', label: 'Highlights' }
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setReviewFilter(key)}
+                  className={`btn btn-sm ${reviewFilter === key ? '' : 'btn-secondary'}`}
+                  style={{ flex: 1, padding: '4px 6px', fontSize: '0.72rem' }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Detailed Selected Move Card (What Went Wrong & Preventative Move) */}
+            <div style={{ padding: '10px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '6px', minHeight: '140px' }}>
               {reviewIndex === 0 ? (
                 <div style={{ textAlign: 'center', margin: 'auto', padding: '10px' }}>
                   <div style={{ fontSize: '1.5rem', marginBottom: '4px' }}>🏁</div>
-                  <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Starting Position</strong>
-                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '4px' }}>Click Next or tap any move to step through history.</p>
+                  <strong style={{ fontSize: '0.85rem', color: 'var(--text-primary)' }}>Initial Board Position</strong>
+                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '4px' }}>Use Next or click any move below to step through analysis.</p>
                 </div>
               ) : (
                 (() => {
@@ -1350,18 +1223,38 @@ const ChessGame = ({ user }) => {
                     <>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                          Move {reviewIndex}: <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '0.85rem' }}>{m.san}</strong> ({m.color === 'w' ? 'White' : 'Black'})
+                          Move {m.moveNum || Math.floor((reviewIndex - 1)/2)+1}: <strong style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{m.san}</strong> ({m.color === 'w' ? 'White' : 'Black'})
                         </span>
-                        <span style={{ fontSize: '0.75rem', fontWeight: '700', color: cat.color, background: `${cat.color}15`, padding: '2px 8px', borderRadius: '4px', border: `1px solid ${cat.color}33`, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: '700', color: cat.color, background: `${cat.color}15`, padding: '2px 8px', borderRadius: '4px', border: `1px solid ${cat.color}33` }}>
                           {cat.emoji} {cat.label}
                         </span>
                       </div>
+
+                      {/* Main Commentary */}
                       <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }}>
                         {m.commentary}
                       </p>
-                      {m.bestMove && (
-                        <div style={{ fontSize: '0.74rem', padding: '6px 8px', background: 'rgba(52,211,153,0.05)', borderLeft: '3px solid #34d399', borderRadius: '0 4px 4px 0', marginTop: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span>Best was: <strong style={{ color: '#34d399', fontFamily: 'var(--font-mono)' }}>{m.bestMove}</strong></span>
+
+                      {/* WHAT WENT WRONG BOX */}
+                      {m.whatWentWrong && (
+                        <div style={{ fontSize: '0.75rem', padding: '6px 8px', background: 'rgba(248,113,113,0.08)', borderLeft: '3px solid var(--danger)', borderRadius: '0 4px 4px 0', marginTop: '2px', color: '#fca5a5' }}>
+                          {m.whatWentWrong}
+                        </div>
+                      )}
+
+                      {/* PREVENTATIVE MOVE BOX */}
+                      {m.preventativeMove && (
+                        <div style={{ fontSize: '0.75rem', padding: '6px 8px', background: 'rgba(52,211,153,0.08)', borderLeft: '3px solid #34d399', borderRadius: '0 4px 4px 0', marginTop: '2px', color: '#a7f3d0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div>{m.preventativeMove}</div>
+                          {m.bestMoveFrom && m.bestMoveTo && (
+                            <button
+                              onClick={() => setShowPreventativeOnBoard(!showPreventativeOnBoard)}
+                              className="btn btn-sm"
+                              style={{ alignSelf: 'flex-start', padding: '2px 8px', fontSize: '0.68rem', background: showPreventativeOnBoard ? '#10b981' : 'rgba(52,211,153,0.2)', border: '1px solid #34d399', color: '#fff' }}
+                            >
+                              {showPreventativeOnBoard ? '✓ Hiding Idea on Board' : '💡 Show Alternative on Board'}
+                            </button>
+                          )}
                         </div>
                       )}
                     </>
@@ -1370,35 +1263,29 @@ const ChessGame = ({ user }) => {
               )}
             </div>
 
-            {/* Scrollable Move History Grid */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '4px' }}>
-              <span style={{ fontWeight: '600', fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Moves Review</span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{reviewHistory.length} moves</span>
-            </div>
-
+            {/* Scrollable Move History List */}
             <div className="move-history" style={{ flex: 1, overflowY: 'auto' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px', padding: '2px' }}>
-                {reviewHistory.map((m, idx) => {
+                {filteredReviewList.map((m) => {
                   const cat = getMoveCategoryInfo(m.classification);
-                  const isCurrent = reviewIndex === idx + 1;
+                  const isCurrent = reviewIndex === m.index;
                   return (
                     <div
-                      key={idx}
-                      onClick={() => setReviewIndex(idx + 1)}
+                      key={m.index}
+                      onClick={() => { setReviewIndex(m.index); setShowPreventativeOnBoard(false); }}
                       style={{
                         padding: '6px 8px',
-                        background: isCurrent ? 'rgba(201, 162, 39, 0.15)' : 'rgba(255,255,255,0.01)',
+                        background: isCurrent ? 'rgba(201, 162, 39, 0.18)' : 'rgba(255,255,255,0.01)',
                         border: isCurrent ? '1px solid var(--gold)' : '1px solid var(--border)',
                         borderRadius: '6px',
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        transition: 'all 0.2s ease',
                       }}
                     >
                       <span style={{ fontSize: '0.8rem', fontWeight: '500', fontFamily: 'var(--font-mono)' }}>
-                        {Math.floor(idx / 2) + 1}.{idx % 2 === 0 ? '' : '..'} {m.san}
+                        {m.moveNum || Math.floor((m.index - 1)/2)+1}.{m.color === 'w' ? '' : '..'} {m.san}
                       </span>
                       <span style={{ fontSize: '0.85rem' }} title={cat.label}>
                         {cat.emoji}
@@ -1409,14 +1296,15 @@ const ChessGame = ({ user }) => {
               </div>
             </div>
 
-            {/* Exit Button */}
-            <div style={{ marginTop: 'auto' }}>
-              <button className="btn btn-gold btn-sm" style={{ width: '100%' }} onClick={() => { setIsReviewMode(false); setGameState('menu'); setIsGameOverState(false); }}>
-                Done & Return to Menu
+            {/* Action Buttons */}
+            <div style={{ marginTop: 'auto', display: 'flex', gap: '6px' }}>
+              <button className="btn btn-gold btn-sm" style={{ flex: 1 }} onClick={() => { setIsReviewMode(false); setGameState('menu'); setIsGameOverState(false); }}>
+                🏠 Main Menu
               </button>
             </div>
           </div>
         ) : (
+          /* ── IN-GAME SIDEBAR WITH ACTION BUTTONS (Fixes Issue 1) ── */
           <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '440px', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button className="btn btn-secondary btn-sm" onClick={handleQuitOrAbandon}>
@@ -1429,21 +1317,40 @@ const ChessGame = ({ user }) => {
 
             <div className={`status-bar ${isThinking ? 'thinking' : ''}`}>{status}</div>
 
-            {/* Helper Features Toggles */}
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '4px 0' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', cursor: 'pointer', userSelect: 'none', flex: 1, padding: '6px', border: '1px solid var(--border)', borderRadius: '6px', background: showDanger ? 'rgba(248,113,113,0.06)' : 'transparent' }}>
+            {/* GAME OVER SUMMARY BOX ON SIDEBAR IF GAME IS OVER */}
+            {isGameOverState && (
+              <div className="slide-in" style={{ padding: '12px', background: 'rgba(201,162,39,0.08)', border: '1px solid var(--gold)', borderRadius: '8px', textAlign: 'center' }}>
+                <div style={{ fontSize: '1.5rem', marginBottom: '4px' }}>🏆</div>
+                <strong style={{ fontSize: '0.9rem', color: 'var(--gold)' }}>Match Finished!</strong>
+                <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+                  <button className="btn btn-gold btn-sm" style={{ flex: 1 }} onClick={startInteractiveReview}>
+                    🔍 Review Game
+                  </button>
+                  <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => { setGameState('menu'); setIsGameOverState(false); }}>
+                    🏠 Main Menu
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Toggles */}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '2px 0' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', cursor: 'pointer', userSelect: 'none', flex: 1, padding: '5px 8px', border: '1px solid var(--border)', borderRadius: '6px' }}>
                 <input type="checkbox" checked={showDanger} onChange={(e) => setShowDanger(e.target.checked)} />
-                ⚠️ Show Danger
+                ⚠️ Danger
               </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', cursor: 'pointer', userSelect: 'none', flex: 1, padding: '6px', border: '1px solid var(--border)', borderRadius: '6px', background: useTutor ? 'rgba(79,140,255,0.06)' : 'transparent' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', cursor: 'pointer', userSelect: 'none', flex: 1, padding: '5px 8px', border: '1px solid var(--border)', borderRadius: '6px' }}>
                 <input type="checkbox" checked={useTutor} onChange={(e) => setUseTutor(e.target.checked)} />
-                🎓 Tutor Mode
+                🎓 Tutor
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', cursor: 'pointer', userSelect: 'none', padding: '5px 8px', border: '1px solid var(--border)', borderRadius: '6px' }}>
+                <input type="checkbox" checked={soundEnabled} onChange={(e) => setSoundEnabled(e.target.checked)} />
+                🔊 Sound
               </label>
             </div>
 
-            {/* Tutor display tip */}
             {useTutor && tutorTip && (
-              <div className="slide-in" style={{ padding: '8px 12px', background: 'rgba(79,140,255,0.05)', borderLeft: '3px solid var(--accent)', borderRadius: '0 6px 6px 0', fontSize: '0.8rem', color: 'var(--text-primary)', lineHeight: 1.4 }}>
+              <div className="slide-in" style={{ padding: '8px 12px', background: 'rgba(79,140,255,0.05)', borderLeft: '3px solid var(--accent)', borderRadius: '0 6px 6px 0', fontSize: '0.78rem', color: 'var(--text-primary)', lineHeight: 1.4 }}>
                 {tutorTip}
               </div>
             )}
@@ -1455,7 +1362,7 @@ const ChessGame = ({ user }) => {
 
             <div className="move-history" style={{ flex: 1, overflowY: 'auto' }}>
               {pairedMoves.length === 0 ? (
-                <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '1.5rem', fontSize: '0.8rem' }}>Tap a piece to select, then tap your target square to move.</p>
+                <p style={{ color: 'var(--text-muted)', textAlign: 'center', marginTop: '1.5rem', fontSize: '0.8rem' }}>Tap a piece to select, then tap your destination square.</p>
               ) : (
                 <table><tbody>
                   {pairedMoves.map((pair, idx) => {
@@ -1466,13 +1373,8 @@ const ChessGame = ({ user }) => {
                         <td style={{ padding: '6px', color: 'var(--text-muted)', width: '28px', fontSize: '0.8rem' }}>{idx + 1}.</td>
                         <td 
                           style={{ 
-                            padding: '6px', 
-                            fontWeight: '500', 
-                            fontFamily: 'var(--font-mono)', 
-                            fontSize: '0.85rem',
-                            cursor: 'pointer',
-                            backgroundColor: currentMoveIndex === whiteMoveIdx ? 'rgba(201, 162, 39, 0.2)' : 'transparent',
-                            borderRadius: '4px'
+                            padding: '6px', fontWeight: '500', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', cursor: 'pointer',
+                            backgroundColor: currentMoveIndex === whiteMoveIdx ? 'rgba(201, 162, 39, 0.2)' : 'transparent', borderRadius: '4px'
                           }}
                           onClick={() => jumpToMove(whiteMoveIdx)}
                         >
@@ -1480,14 +1382,8 @@ const ChessGame = ({ user }) => {
                         </td>
                         <td 
                           style={{ 
-                            padding: '6px', 
-                            fontWeight: '500', 
-                            fontFamily: 'var(--font-mono)', 
-                            fontSize: '0.85rem', 
-                            color: 'var(--text-secondary)',
-                            cursor: 'pointer',
-                            backgroundColor: currentMoveIndex === blackMoveIdx ? 'rgba(201, 162, 39, 0.2)' : 'transparent',
-                            borderRadius: '4px'
+                            padding: '6px', fontWeight: '500', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: 'var(--text-secondary)', cursor: 'pointer',
+                            backgroundColor: currentMoveIndex === blackMoveIdx ? 'rgba(201, 162, 39, 0.2)' : 'transparent', borderRadius: '4px'
                           }}
                           onClick={pair.black ? () => jumpToMove(blackMoveIdx) : undefined}
                         >
@@ -1500,30 +1396,37 @@ const ChessGame = ({ user }) => {
               )}
             </div>
 
-            {/* Action buttons (Resign, Offer Draw, Quit) */}
-            <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
-              <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={handleResign} disabled={isThinking || gameRef.current.isGameOver()}>🏳️ Resign</button>
-              {gameMode === 'bot' && (
-                <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={handleOfferDraw} disabled={isThinking || gameRef.current.isGameOver()}>🤝 Offer Draw</button>
-              )}
-              <button className="btn btn-danger btn-sm" style={{ flex: 1 }} onClick={handleQuitOrAbandon}>✕ Quit</button>
-            </div>
+            {/* In-game Bottom Buttons */}
+            {!isGameOverState ? (
+              <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
+                <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={handleResign} disabled={isThinking || gameRef.current.isGameOver()}>🏳️ Resign</button>
+                {gameMode === 'bot' && (
+                  <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={handleOfferDraw} disabled={isThinking || gameRef.current.isGameOver()}>🤝 Draw</button>
+                )}
+                <button className="btn btn-danger btn-sm" style={{ flex: 1 }} onClick={handleQuitOrAbandon}>✕ Quit</button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
+                <button className="btn btn-gold btn-sm" style={{ flex: 1 }} onClick={startInteractiveReview}>🔍 Game Review</button>
+                <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={() => { setGameState('menu'); setIsGameOverState(false); }}>🏠 Main Menu</button>
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* ABANDON MATCH CONFIRMATION PROMPT */}
+      {/* ABANDON CONFIRMATION MODAL */}
       {showAbandonPrompt && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 4000, padding: '20px' }}>
           <div className="glass-panel fade-in" style={{ maxWidth: '400px', width: '100%', textAlign: 'center', padding: '24px', border: '1px solid var(--danger)' }}>
             <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>⚠️</div>
             <h3 style={{ marginBottom: '0.5rem' }}>Abandon Match?</h3>
             <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '1.5rem' }}>
-              Leaving this match now will count as a forfeit/loss. Are you sure you want to abandon?
+              Leaving this match now will count as a forfeit loss. Are you sure?
             </p>
             <div style={{ display: 'flex', gap: '10px' }}>
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowAbandonPrompt(false)}>
-                Continue Play
+                Continue Playing
               </button>
               <button className="btn btn-danger" style={{ flex: 1 }} onClick={confirmAbandon}>
                 Yes, Forfeit
@@ -1533,14 +1436,14 @@ const ChessGame = ({ user }) => {
         </div>
       )}
 
-      {/* GAME ANALYSIS MODAL OVERLAY */}
+      {/* GAME OVER ANALYSIS OVERLAY MODAL (Always triggered upon match finish) */}
       {showAnalysis && analysisData && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, padding: '20px' }}>
-          <div className="glass-panel fade-in" style={{ maxWidth: '580px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(201, 162, 39, 0.3)', padding: '24px' }}>
+          <div className="glass-panel fade-in" style={{ maxWidth: '580px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(201, 162, 39, 0.4)', padding: '24px' }}>
             <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
               <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>📊</div>
-              <h2 style={{ marginBottom: '4px' }}>Game Analysis</h2>
-              <span className={`badge ${analysisData.result === '1-0' ? 'badge-win' : analysisData.result === '0-1' ? 'badge-loss' : 'badge-draw'}`} style={{ fontSize: '0.9rem', padding: '4px 14px' }}>
+              <h2 style={{ marginBottom: '6px' }}>Game Performance Analysis</h2>
+              <span className={`badge ${analysisData.result === '1-0' ? 'badge-win' : analysisData.result === '0-1' ? 'badge-loss' : 'badge-draw'}`} style={{ fontSize: '0.95rem', padding: '6px 16px' }}>
                 {analysisData.result === '1-0' ? '✓ Victory' : analysisData.result === '0-1' ? '✗ Defeat' : '= Draw'}
               </span>
             </div>
@@ -1549,22 +1452,22 @@ const ChessGame = ({ user }) => {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
               <div className="stat-card">
                 <div className="stat-value" style={{ color: 'var(--gold)' }}>{analysisData.accuracy}%</div>
-                <div className="stat-label">Accuracy</div>
+                <div className="stat-label">Accuracy Score</div>
               </div>
               <div className="stat-card">
                 <div className="stat-value" style={{ color: 'var(--accent)' }}>{analysisData.performanceRating}</div>
-                <div className="stat-label">Performance ELO</div>
+                <div className="stat-label">Performance Rating</div>
               </div>
             </div>
 
             {/* Opening info */}
             <div style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Opening Played:</span>
-              <strong style={{ color: 'var(--gold)', fontSize: '0.9rem' }}>{analysisData.openingName || 'Unknown Opening'}</strong>
+              <strong style={{ color: 'var(--gold)', fontSize: '0.9rem' }}>{analysisData.openingName || 'Standard Opening'}</strong>
             </div>
 
-            {/* Move Classifications grid */}
-            <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>Move Classifications</h4>
+            {/* Move Classifications Grid */}
+            <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>Move Quality Breakdown</h4>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px', marginBottom: '1.5rem' }}>
               {moveCategories.map(({ key, label, emoji, color }) => {
                 const val = analysisData.analysis?.[key] || 0;
@@ -1572,13 +1475,13 @@ const ChessGame = ({ user }) => {
                   <div key={key} style={{ padding: '8px 4px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: '6px', textAlign: 'center' }}>
                     <div style={{ fontSize: '1.1rem' }} title={label}>{emoji}</div>
                     <div style={{ fontSize: '0.9rem', fontWeight: '700', color, fontFamily: 'var(--font-mono)' }}>{val}</div>
-                    <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', overflow: 'hidden', textBreak: 'break-all', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
+                    <div style={{ fontSize: '0.62rem', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
                   </div>
                 );
               })}
             </div>
 
-            {/* Phase accuracy progress bars */}
+            {/* Phase Accuracy Bars */}
             <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>Phase Breakdown</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '2rem' }}>
               {['opening', 'middlegame', 'endgame'].map((phase) => {
@@ -1598,7 +1501,7 @@ const ChessGame = ({ user }) => {
               })}
             </div>
 
-            {/* Action buttons */}
+            {/* Action Buttons */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '1rem' }}>
               <button 
                 className="btn btn-gold" 
@@ -1612,7 +1515,7 @@ const ChessGame = ({ user }) => {
                 style={{ flex: 1, padding: '12px' }} 
                 onClick={() => { setShowAnalysis(false); setGameState('menu'); setIsGameOverState(false); }}
               >
-                Return to Menu
+                🏠 Return to Menu
               </button>
             </div>
           </div>

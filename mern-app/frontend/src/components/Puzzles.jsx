@@ -3,6 +3,7 @@ import { Chess } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { getCustomPieces } from '../utils/pieceSets';
 
 const PUZZLES = [
   { id: 1, fen: 'r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4', solution: 'Qxf7', instruction: 'White to move — Scholar\'s Mate!', hint: 'The queen can deliver checkmate on f7.', category: 'Checkmate', rating: 600 },
@@ -18,7 +19,7 @@ const PUZZLES = [
 ];
 
 const Puzzles = () => {
-  const { theme } = useTheme();
+  const { theme, pieceSetId } = useTheme();
   const { t } = useLanguage();
   const [currentPuzzle, setCurrentPuzzle] = useState(0);
   const [streak, setStreak] = useState(0);
@@ -35,6 +36,7 @@ const Puzzles = () => {
   const [completed, setCompleted] = useState(false);
   const [boardWidth, setBoardWidth] = useState(480);
 
+  const customPieces = useMemo(() => getCustomPieces(pieceSetId), [pieceSetId]);
   const puzzle = PUZZLES[currentPuzzle];
 
   useEffect(() => {
@@ -108,7 +110,6 @@ const Puzzles = () => {
     return true;
   }, []);
 
-  // react-chessboard v5: onSquareClick receives { piece, square } object
   const onSquareClick = useCallback(({ square } = {}) => {
     if (!square || completed) return;
     const turn = gameRef.current.turn();
@@ -131,7 +132,6 @@ const Puzzles = () => {
     }
   }, [completed, moveFrom, tryMove, getMoveOptions]);
 
-  // react-chessboard v5: onPieceDrop receives { piece, sourceSquare, targetSquare } object
   const onDrop = useCallback(({ sourceSquare, targetSquare } = {}) => {
     if (!sourceSquare || !targetSquare) return false;
     return tryMove(sourceSquare, targetSquare);
@@ -147,10 +147,11 @@ const Puzzles = () => {
     squareStyles: optionSquares,
     darkSquareStyle: { backgroundColor: theme.darkSquare },
     lightSquareStyle: { backgroundColor: theme.lightSquare },
+    customPieces: customPieces,
     canDragPiece: () => !completed,
     boardOrientation: puzzle.fen.includes(' b ') ? 'black' : 'white',
     showNotation: true,
-  }), [fen, onDrop, onSquareClick, optionSquares, theme, completed, puzzle]);
+  }), [fen, onDrop, onSquareClick, optionSquares, theme, customPieces, completed, puzzle]);
 
   const statusStyle = {
     info: { borderColor: 'var(--accent)', color: 'var(--accent)' },
@@ -160,7 +161,6 @@ const Puzzles = () => {
 
   return (
     <div className="fade-in" style={{ maxWidth: '640px', margin: '2rem auto' }}>
-      {/* Stats bar */}
       <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
         {[
           { val: solved, label: 'Solved', color: 'var(--success)' },
@@ -175,7 +175,6 @@ const Puzzles = () => {
       </div>
 
       <div className="glass-panel" style={{ textAlign: 'center' }}>
-        {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <h2 style={{ margin: 0 }}>{t('puzzles')} #{currentPuzzle + 1}</h2>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -184,22 +183,18 @@ const Puzzles = () => {
           </div>
         </div>
 
-        {/* Progress */}
         <div className="progress-bar-track" style={{ marginBottom: '1rem' }}>
           <div className="progress-bar-fill" style={{ width: `${((currentPuzzle + (completed ? 1 : 0)) / PUZZLES.length) * 100}%` }} />
         </div>
 
-        {/* Status */}
         <div className="status-bar" style={{ marginBottom: '1rem', ...statusStyle }}>{status}</div>
 
-        {/* Board */}
         <div style={{ maxWidth: '500px', margin: '0 auto' }}>
           <Chessboard
             options={chessboardOptions}
           />
         </div>
 
-        {/* Controls */}
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '1.25rem', flexWrap: 'wrap' }}>
           <button className="btn btn-secondary btn-sm" onClick={() => setShowHint(!showHint)}>💡 {showHint ? t('hide_hint') : t('show_hint')}</button>
           <button className="btn btn-secondary btn-sm" onClick={() => loadPuzzle(currentPuzzle)}>↺ {t('restart')}</button>

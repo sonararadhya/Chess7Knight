@@ -3,6 +3,7 @@ import { Chess } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { getCustomPieces } from '../utils/pieceSets';
 
 const DRILLS = {
   openings: [
@@ -29,7 +30,7 @@ const CATEGORIES = [
 ];
 
 const Practice = () => {
-  const { theme } = useTheme();
+  const { theme, pieceSetId } = useTheme();
   const { t } = useLanguage();
   const [category, setCategory] = useState(null);
   const [drillIdx, setDrillIdx] = useState(0);
@@ -42,6 +43,8 @@ const Practice = () => {
 
   const gameRef = useRef(new Chess());
   const [fen, setFen] = useState('start');
+
+  const customPieces = useMemo(() => getCustomPieces(pieceSetId), [pieceSetId]);
 
   useEffect(() => {
     const updateSize = () => setBoardWidth(Math.min(480, window.innerWidth - 48));
@@ -109,7 +112,6 @@ const Practice = () => {
     return true;
   }, []);
 
-  // react-chessboard v5: onSquareClick receives { piece, square } object
   const onSquareClick = useCallback(({ square } = {}) => {
     if (!square || completed || !drill) return;
     const turn = gameRef.current.turn();
@@ -142,12 +144,12 @@ const Practice = () => {
     squareStyles: optionSquares,
     darkSquareStyle: { backgroundColor: theme.darkSquare },
     lightSquareStyle: { backgroundColor: theme.lightSquare },
+    customPieces: customPieces,
     canDragPiece: () => !completed,
     boardOrientation: drill?.fen.includes(' b ') ? 'black' : 'white',
     showNotation: true,
-  }), [fen, tryMove, onSquareClick, optionSquares, theme, completed, drill]);
+  }), [fen, tryMove, onSquareClick, optionSquares, theme, customPieces, completed, drill]);
 
-  // ── Category Selection ──
   if (!category) {
     return (
       <div className="fade-in" style={{ maxWidth: '860px', margin: '2rem auto' }}>
@@ -175,7 +177,6 @@ const Practice = () => {
     );
   }
 
-  // ── Drill View ──
   const statusStyle = { info: { borderColor: 'var(--accent)', color: 'var(--accent)' }, success: { borderColor: 'var(--success)', color: 'var(--success)' }, error: { borderColor: 'var(--danger)', color: 'var(--danger)' } }[statusType];
 
   return (
@@ -206,7 +207,6 @@ const Practice = () => {
           )}
         </div>
 
-        {/* Drill selector */}
         <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', marginTop: '1rem', flexWrap: 'wrap' }}>
           {catDrills.map((d, i) => (
             <button key={i} onClick={() => startDrill(category, i)} className={`btn btn-sm ${i === drillIdx ? '' : 'btn-secondary'}`} style={{ padding: '5px 10px', fontSize: '0.78rem' }}>

@@ -26,6 +26,14 @@ const MatchSchema = new mongoose.Schema({
     type: String,
     default: 'no limit'
   },
+  eloChange: {
+    type: Number,
+    default: 0
+  },
+  ratingAfter: {
+    type: Number,
+    default: 1200
+  },
   analysis: {
     brilliant: { type: Number, default: 0 },
     great: { type: Number, default: 0 },

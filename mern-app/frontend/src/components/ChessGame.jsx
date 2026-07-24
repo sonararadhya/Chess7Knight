@@ -8,6 +8,7 @@ import { useLanguage } from '../contexts/LanguageContext';
 import { getCustomPieces } from '../utils/pieceSets';
 import { soundFx } from '../utils/audio';
 import { generateIndustryGameReview } from '../utils/reviewEngine';
+import { calculateEloChange } from '../utils/elo';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
@@ -45,7 +46,6 @@ const getMoveCategoryInfo = (classification) => {
   return moveCategories.find(c => c.key === classification) || { label: 'Good', emoji: '👍', color: '#6b7280' };
 };
 
-// Helper for local storage match history persistence
 export const saveMatchToLocalStorage = (matchData) => {
   try {
     const existing = JSON.parse(localStorage.getItem('chess7k_match_history') || '[]');
@@ -66,13 +66,13 @@ const ChessGame = ({ user }) => {
 
   // Settings & Menu States
   const [gameState, setGameState] = useState('menu');
-  const [gameMode, setGameMode] = useState('bot'); // 'bot' or 'local'
+  const [gameMode, setGameMode] = useState('bot');
   const [selectedElo, setSelectedElo] = useState(1200);
-  const [selectedTime, setSelectedTime] = useState(TIME_CONTROLS[4]); // Default 5m Blitz
-  const [playerColor, setPlayerColor] = useState('white'); // 'white', 'black', 'random'
-  const [actualColor, setActualColor] = useState('white'); // 'white' or 'black'
+  const [selectedTime, setSelectedTime] = useState(TIME_CONTROLS[4]);
+  const [playerColor, setPlayerColor] = useState('white');
+  const [actualColor, setActualColor] = useState('white');
 
-  // Chess Engine States
+  // Engine States
   const gameRef = useRef(new Chess());
   const [fen, setFen] = useState(gameRef.current.fen());
   const [pastFens, setPastFens] = useState([gameRef.current.fen()]);
@@ -83,7 +83,7 @@ const ChessGame = ({ user }) => {
   const [moveSquares, setMoveSquares] = useState({});
   const [moveFrom, setMoveFrom] = useState(null);
   const [boardWidth, setBoardWidth] = useState(480);
-  const [promotionPending, setPromotionPending] = useState(null); // { from, to, color }
+  const [promotionPending, setPromotionPending] = useState(null);
 
   // Helper features
   const [showDanger, setShowDanger] = useState(false);
@@ -104,17 +104,20 @@ const ChessGame = ({ user }) => {
   const [reviewHistory, setReviewHistory] = useState([]);
   const [reviewIndex, setReviewIndex] = useState(0);
   const [isGameOverState, setIsGameOverState] = useState(false);
-  const [reviewFilter, setReviewFilter] = useState('all'); // 'all', 'mistakes', 'brilliant'
+  const [reviewFilter, setReviewFilter] = useState('all');
   const [showPreventativeOnBoard, setShowPreventativeOnBoard] = useState(false);
 
   // Custom Pieces renderer
   const customPieces = useMemo(() => getCustomPieces(pieceSetId), [pieceSetId]);
 
-  // Handle external review launch (e.g. passed from Profile or Dashboard)
+  // FIX BUG 3: Handle external review launch cleanly WITHOUT popping up defeat overlay
   useEffect(() => {
     if (location.state?.reviewMatch) {
       const match = location.state.reviewMatch;
       setAnalysisData(match);
+      setShowAnalysis(false); // CRITICAL: Reset analysis modal so defeat screen doesn't pop up!
+      setIsGameOverState(false);
+      
       if (match.reviewList) {
         setReviewHistory(match.reviewList);
         setReviewIndex(match.reviewList.length);
@@ -185,7 +188,6 @@ const ChessGame = ({ user }) => {
     color: `chess7k_active_game_color`,
   });
 
-  // Calculate danger squares
   const calculateDangerSquares = useCallback(() => {
     if (!showDanger) {
       setDangerSquares({});
@@ -207,7 +209,6 @@ const ChessGame = ({ user }) => {
     }
   }, [showDanger, fen]);
 
-  // Tutor suggestions
   const generateTutorTip = useCallback(() => {
     if (!useTutor) {
       setTutorTip('');
@@ -320,7 +321,6 @@ const ChessGame = ({ user }) => {
     }
   }, [fen, playerTime, botTime, gameState, isGameOverState, saveStateToStorage]);
 
-  // Responsive board width
   useEffect(() => {
     const updateSize = () => {
       setBoardWidth(Math.min(540, window.innerWidth - 40));
@@ -379,7 +379,7 @@ const ChessGame = ({ user }) => {
     return `${m}:${s.toString().padStart(2, '0')}`;
   };
 
-  // ── SAVE MATCH & GENERATE REVIEW (Fixes Issue 1 & Issue 3) ──
+  // ── SAVE MATCH & CALCULATE ELO (Fixes Issue 1, Request 5) ──
   const saveMatch = async (result) => {
     if (timerRef.current) clearInterval(timerRef.current);
     setIsGameOverState(true);
@@ -393,6 +393,15 @@ const ChessGame = ({ user }) => {
       else if (result === '0-1') normalizedResult = '1-0';
     }
 
+    // ELO Calculation for Win / Loss / Draw
+    const currentElo = user?.rating ?? (parseInt(localStorage.getItem('chess7k_guest_elo')) || 1200);
+    const eloCalc = calculateEloChange(currentElo, selectedElo, normalizedResult);
+
+    // Update guest ELO in local storage if not logged in
+    if (!user) {
+      localStorage.setItem('chess7k_guest_elo', String(eloCalc.newRating));
+    }
+
     const matchObj = {
       _id: 'match_' + Date.now(),
       id: 'match_' + Date.now(),
@@ -402,6 +411,8 @@ const ChessGame = ({ user }) => {
       accuracy: fullReview.accuracy,
       difficulty: selectedElo,
       timeControl: selectedTime.label,
+      eloChange: eloCalc.delta,
+      ratingAfter: eloCalc.newRating,
       analysis: fullReview.classificationsCount,
       performanceRating: fullReview.performanceRating,
       openingName: fullReview.openingName,
@@ -431,6 +442,8 @@ const ChessGame = ({ user }) => {
         if (res.data?.match) {
           const apiMatch = {
             ...res.data.match,
+            eloChange: res.data.match.eloChange || eloCalc.delta,
+            ratingAfter: res.data.newRating || eloCalc.newRating,
             reviewList: fullReview.reviewList,
             turningPoint: fullReview.turningPoint
           };
@@ -440,14 +453,13 @@ const ChessGame = ({ user }) => {
           setAnalysisData(matchObj);
         }
       } catch (err) {
-        console.error('Backend match save error, using local match fallback', err);
+        console.error('Backend match save error, using local fallback', err);
         setAnalysisData(matchObj);
       }
     } else {
       setAnalysisData(matchObj);
     }
 
-    // ALWAYS display analysis modal upon match completion!
     setShowAnalysis(true);
   };
 
@@ -501,7 +513,6 @@ const ChessGame = ({ user }) => {
 
       return result;
     } catch (error) {
-      console.error('Error during makeAMove:', error, move);
       return null;
     }
   }, []);
@@ -678,7 +689,6 @@ const ChessGame = ({ user }) => {
     return true;
   }, [isReviewMode, currentMoveIndex, pastFens.length, isThinking, gameState, gameMode, actualColor, makeAMove, checkGameOver, checkIfPromotionMove]);
 
-  // Custom Review styles (Highlighting moves + Preventative moves)
   const getReviewSquareStyles = useCallback(() => {
     if (!isReviewMode || reviewIndex === 0) return {};
     const move = reviewHistory[reviewIndex - 1];
@@ -694,7 +704,6 @@ const ChessGame = ({ user }) => {
       };
     }
 
-    // Highlight Preventative Move if toggled
     if (showPreventativeOnBoard && move.bestMoveFrom && move.bestMoveTo) {
       styles[move.bestMoveFrom] = {
         boxShadow: '0 0 0 4px #34d399, 0 0 16px #34d399',
@@ -716,6 +725,7 @@ const ChessGame = ({ user }) => {
     setCurrentMoveIndex(index);
   }, [pastFens.length]);
 
+  // FIX REQUEST 1 & 2: Pass customPieces & theme darkSquareStyle / lightSquareStyle directly into Chessboard options
   const chessboardOptions = useMemo(() => {
     return {
       id: 'game-board',
@@ -725,13 +735,12 @@ const ChessGame = ({ user }) => {
       onPieceDrop: onPieceDrop,
       onSquareClick: onSquareClick,
       animationDurationInMs: 220,
-      boardStyle: { borderRadius: '8px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' },
+      boardStyle: { borderRadius: '10px', boxShadow: '0 16px 48px rgba(0,0,0,0.6)' },
       squareStyles: isReviewMode 
         ? getReviewSquareStyles() 
         : { ...moveSquares, ...optionSquares, ...dangerSquares },
-      darkSquareStyle: { backgroundColor: theme.darkSquare },
-      lightSquareStyle: { backgroundColor: theme.lightSquare },
-      customPieces: customPieces,
+      darkSquareStyle: theme.darkSquareStyle || { backgroundColor: theme.darkSquare },
+      lightSquareStyle: theme.lightSquareStyle || { backgroundColor: theme.lightSquare },
       canDragPiece: ({ square }) => {
         if (isReviewMode || currentMoveIndex !== pastFens.length - 1) return false;
         if (isThinking || gameRef.current.isGameOver()) return false;
@@ -755,7 +764,6 @@ const ChessGame = ({ user }) => {
     optionSquares,
     dangerSquares,
     theme,
-    customPieces,
     isThinking,
     actualColor,
     gameMode
@@ -871,7 +879,6 @@ const ChessGame = ({ user }) => {
     }
   }, [fen, gameState, gameMode, isThinking, actualColor, makeBotMove, isGameOverState]);
 
-  // Initial bot move when player chooses Black
   useEffect(() => {
     if (gameState === 'playing' && gameMode === 'bot' && actualColor === 'black' && !isThinking && !isGameOverState) {
       const turn = gameRef.current.turn();
@@ -935,7 +942,7 @@ const ChessGame = ({ user }) => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px', fontWeight: '600' }}>
-                🎨 Board Theme
+                🎨 Board Theme Design
               </label>
               <select value={themeId} onChange={e => setThemeId(e.target.value)} className="form-control" style={{ fontSize: '0.85rem', padding: '8px' }}>
                 {Object.entries(allThemes).map(([id, th]) => (
@@ -1020,7 +1027,6 @@ const ChessGame = ({ user }) => {
   const opponentLabel = gameMode === 'bot' ? `Bot ELO ${selectedElo}` : 'Local Opponent';
   const playerLabel = gameMode === 'bot' ? (user ? user.email.split('@')[0] : 'Guest') : 'Local Player';
 
-  // Filtered review moves
   const filteredReviewList = reviewHistory.filter((m) => {
     if (reviewFilter === 'mistakes') return ['blunder', 'mistake', 'inaccuracy', 'miss'].includes(m.classification);
     if (reviewFilter === 'brilliant') return ['brilliant', 'great', 'best'].includes(m.classification);
@@ -1030,7 +1036,7 @@ const ChessGame = ({ user }) => {
   return (
     <div className="game-container fade-in">
       <div>
-        {/* Top / Opponent Header with Captured Pieces */}
+        {/* Top Opponent Panel */}
         <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <div style={{ width: '36px', height: '36px', background: 'rgba(15,21,37,0.8)', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem', border: '1px solid var(--border)' }}>
@@ -1045,7 +1051,6 @@ const ChessGame = ({ user }) => {
                   materialInfo.diff > 0 && <span style={{ fontSize: '0.75rem', color: 'var(--gold)', fontWeight: '700' }}>+{materialInfo.diff}</span>
                 )}
               </div>
-              {/* Captured pieces taken by opponent */}
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'flex', gap: '2px', flexWrap: 'wrap' }}>
                 {actualColor === 'white' 
                   ? materialInfo.capturedByBlack.map((p, idx) => <span key={idx}>{p.symbol}</span>)
@@ -1062,11 +1067,10 @@ const ChessGame = ({ user }) => {
           )}
         </div>
 
-        {/* Chessboard */}
+        {/* FIX REQUEST 1: Pass customPieces directly as prop to Chessboard */}
         <div className="board-wrapper">
-          <Chessboard options={chessboardOptions} />
+          <Chessboard customPieces={customPieces} options={chessboardOptions} />
           
-          {/* Promotion Modal Overlay */}
           {promotionPending && (
             <div style={{
               position: 'absolute', inset: 0, background: 'rgba(10, 14, 26, 0.92)',
@@ -1122,7 +1126,7 @@ const ChessGame = ({ user }) => {
           </div>
         )}
 
-        {/* Bottom / Player Header with Captured Pieces */}
+        {/* Bottom Player Panel */}
         <div className="glass-panel" style={{ padding: '0.6rem 1rem', marginTop: '0.6rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <div style={{ width: '36px', height: '36px', background: 'linear-gradient(135deg, var(--accent), var(--purple))', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>👤</div>
@@ -1154,7 +1158,6 @@ const ChessGame = ({ user }) => {
       {/* Sidebar Controls Panel */}
       <div className="controls-panel">
         {isReviewMode ? (
-          /* ── DETAILED INTERACTIVE REVIEW SIDEBAR (Fixes Issue 3) ── */
           <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '440px', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button className="btn btn-secondary btn-sm" onClick={() => setIsReviewMode(false)}>
@@ -1165,7 +1168,6 @@ const ChessGame = ({ user }) => {
               </span>
             </div>
 
-            {/* Performance Rating & Accuracy Header */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
               <div style={{ padding: '6px', background: 'rgba(255,255,255,0.02)', borderRadius: '6px', border: '1px solid var(--border)', textAlign: 'center' }}>
                 <div style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--gold)', fontFamily: 'var(--font-mono)' }}>
@@ -1181,14 +1183,12 @@ const ChessGame = ({ user }) => {
               </div>
             </div>
 
-            {/* Turning Point Alert Banner if available */}
             {analysisData?.turningPoint && (
               <div style={{ padding: '8px 10px', background: 'rgba(248,113,113,0.08)', borderLeft: '3px solid var(--danger)', borderRadius: '0 6px 6px 0', fontSize: '0.75rem', lineHeight: 1.4 }}>
                 <strong>⚡ Key Turning Point:</strong> Move {analysisData.turningPoint.moveNum} ({analysisData.turningPoint.player}) — {analysisData.turningPoint.san} ({analysisData.turningPoint.classification})
               </div>
             )}
 
-            {/* Filter Tabs */}
             <div style={{ display: 'flex', gap: '4px', background: 'rgba(0,0,0,0.2)', padding: '2px', borderRadius: '6px' }}>
               {[
                 { key: 'all', label: 'All Moves' },
@@ -1206,7 +1206,6 @@ const ChessGame = ({ user }) => {
               ))}
             </div>
 
-            {/* Detailed Selected Move Card (What Went Wrong & Preventative Move) */}
             <div style={{ padding: '10px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '6px', minHeight: '140px' }}>
               {reviewIndex === 0 ? (
                 <div style={{ textAlign: 'center', margin: 'auto', padding: '10px' }}>
@@ -1230,19 +1229,16 @@ const ChessGame = ({ user }) => {
                         </span>
                       </div>
 
-                      {/* Main Commentary */}
                       <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4, margin: 0 }}>
                         {m.commentary}
                       </p>
 
-                      {/* WHAT WENT WRONG BOX */}
                       {m.whatWentWrong && (
                         <div style={{ fontSize: '0.75rem', padding: '6px 8px', background: 'rgba(248,113,113,0.08)', borderLeft: '3px solid var(--danger)', borderRadius: '0 4px 4px 0', marginTop: '2px', color: '#fca5a5' }}>
                           {m.whatWentWrong}
                         </div>
                       )}
 
-                      {/* PREVENTATIVE MOVE BOX */}
                       {m.preventativeMove && (
                         <div style={{ fontSize: '0.75rem', padding: '6px 8px', background: 'rgba(52,211,153,0.08)', borderLeft: '3px solid #34d399', borderRadius: '0 4px 4px 0', marginTop: '2px', color: '#a7f3d0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           <div>{m.preventativeMove}</div>
@@ -1263,7 +1259,6 @@ const ChessGame = ({ user }) => {
               )}
             </div>
 
-            {/* Scrollable Move History List */}
             <div className="move-history" style={{ flex: 1, overflowY: 'auto' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px', padding: '2px' }}>
                 {filteredReviewList.map((m) => {
@@ -1296,7 +1291,6 @@ const ChessGame = ({ user }) => {
               </div>
             </div>
 
-            {/* Action Buttons */}
             <div style={{ marginTop: 'auto', display: 'flex', gap: '6px' }}>
               <button className="btn btn-gold btn-sm" style={{ flex: 1 }} onClick={() => { setIsReviewMode(false); setGameState('menu'); setIsGameOverState(false); }}>
                 🏠 Main Menu
@@ -1304,7 +1298,6 @@ const ChessGame = ({ user }) => {
             </div>
           </div>
         ) : (
-          /* ── IN-GAME SIDEBAR WITH ACTION BUTTONS (Fixes Issue 1) ── */
           <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '440px', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <button className="btn btn-secondary btn-sm" onClick={handleQuitOrAbandon}>
@@ -1317,7 +1310,6 @@ const ChessGame = ({ user }) => {
 
             <div className={`status-bar ${isThinking ? 'thinking' : ''}`}>{status}</div>
 
-            {/* GAME OVER SUMMARY BOX ON SIDEBAR IF GAME IS OVER */}
             {isGameOverState && (
               <div className="slide-in" style={{ padding: '12px', background: 'rgba(201,162,39,0.08)', border: '1px solid var(--gold)', borderRadius: '8px', textAlign: 'center' }}>
                 <div style={{ fontSize: '1.5rem', marginBottom: '4px' }}>🏆</div>
@@ -1333,7 +1325,6 @@ const ChessGame = ({ user }) => {
               </div>
             )}
 
-            {/* Toggles */}
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', padding: '2px 0' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', cursor: 'pointer', userSelect: 'none', flex: 1, padding: '5px 8px', border: '1px solid var(--border)', borderRadius: '6px' }}>
                 <input type="checkbox" checked={showDanger} onChange={(e) => setShowDanger(e.target.checked)} />
@@ -1396,7 +1387,6 @@ const ChessGame = ({ user }) => {
               )}
             </div>
 
-            {/* In-game Bottom Buttons */}
             {!isGameOverState ? (
               <div style={{ display: 'flex', gap: '6px', marginTop: 'auto' }}>
                 <button className="btn btn-secondary btn-sm" style={{ flex: 1 }} onClick={handleResign} disabled={isThinking || gameRef.current.isGameOver()}>🏳️ Resign</button>
@@ -1436,19 +1426,32 @@ const ChessGame = ({ user }) => {
         </div>
       )}
 
-      {/* GAME OVER ANALYSIS OVERLAY MODAL (Always triggered upon match finish) */}
+      {/* GAME OVER ANALYSIS OVERLAY MODAL */}
       {showAnalysis && analysisData && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, padding: '20px' }}>
           <div className="glass-panel fade-in" style={{ maxWidth: '580px', width: '100%', maxHeight: '90vh', overflowY: 'auto', border: '1px solid rgba(201, 162, 39, 0.4)', padding: '24px' }}>
             <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
               <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>📊</div>
               <h2 style={{ marginBottom: '6px' }}>Game Performance Analysis</h2>
-              <span className={`badge ${analysisData.result === '1-0' ? 'badge-win' : analysisData.result === '0-1' ? 'badge-loss' : 'badge-draw'}`} style={{ fontSize: '0.95rem', padding: '6px 16px' }}>
-                {analysisData.result === '1-0' ? '✓ Victory' : analysisData.result === '0-1' ? '✗ Defeat' : '= Draw'}
-              </span>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', alignItems: 'center' }}>
+                <span className={`badge ${analysisData.result === '1-0' ? 'badge-win' : analysisData.result === '0-1' ? 'badge-loss' : 'badge-draw'}`} style={{ fontSize: '0.95rem', padding: '6px 16px' }}>
+                  {analysisData.result === '1-0' ? '✓ Victory' : analysisData.result === '0-1' ? '✗ Defeat' : '= Draw'}
+                </span>
+                
+                {/* REQUEST 5: ELO CHANGE BADGE */}
+                {analysisData.eloChange !== undefined && (
+                  <span className="badge" style={{
+                    fontSize: '0.95rem', padding: '6px 16px',
+                    backgroundColor: analysisData.eloChange > 0 ? 'rgba(52,211,153,0.15)' : analysisData.eloChange < 0 ? 'rgba(248,113,113,0.15)' : 'rgba(255,255,255,0.05)',
+                    color: analysisData.eloChange > 0 ? '#34d399' : analysisData.eloChange < 0 ? '#f87171' : 'var(--text-muted)',
+                    border: `1px solid ${analysisData.eloChange > 0 ? '#34d399' : analysisData.eloChange < 0 ? '#f87171' : 'var(--border)'}`
+                  }}>
+                    {analysisData.eloChange > 0 ? `+${analysisData.eloChange}` : analysisData.eloChange} ELO (Now {analysisData.ratingAfter || 1200})
+                  </span>
+                )}
+              </div>
             </div>
 
-            {/* Performance metrics */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
               <div className="stat-card">
                 <div className="stat-value" style={{ color: 'var(--gold)' }}>{analysisData.accuracy}%</div>
@@ -1460,13 +1463,11 @@ const ChessGame = ({ user }) => {
               </div>
             </div>
 
-            {/* Opening info */}
             <div style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Opening Played:</span>
               <strong style={{ color: 'var(--gold)', fontSize: '0.9rem' }}>{analysisData.openingName || 'Standard Opening'}</strong>
             </div>
 
-            {/* Move Classifications Grid */}
             <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>Move Quality Breakdown</h4>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px', marginBottom: '1.5rem' }}>
               {moveCategories.map(({ key, label, emoji, color }) => {
@@ -1481,7 +1482,6 @@ const ChessGame = ({ user }) => {
               })}
             </div>
 
-            {/* Phase Accuracy Bars */}
             <h4 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '10px' }}>Phase Breakdown</h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '2rem' }}>
               {['opening', 'middlegame', 'endgame'].map((phase) => {
@@ -1501,7 +1501,6 @@ const ChessGame = ({ user }) => {
               })}
             </div>
 
-            {/* Action Buttons */}
             <div style={{ display: 'flex', gap: '10px', marginTop: '1rem' }}>
               <button 
                 className="btn btn-gold" 

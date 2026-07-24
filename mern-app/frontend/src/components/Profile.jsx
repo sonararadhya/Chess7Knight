@@ -32,7 +32,6 @@ const Profile = ({ user }) => {
         const res = await axios.get(`${API_URL}/matches/history`, { headers: { 'x-auth-token': token } });
         const apiMatches = res.data || [];
         
-        // Merge API matches and Local matches cleanly
         const map = new Map();
         [...apiMatches, ...localMatches].forEach(m => {
           const key = m._id || m.id || m.date;
@@ -62,6 +61,9 @@ const Profile = ({ user }) => {
   const draws = history.filter(m => m.result === '1/2-1/2').length;
   const winRate = history.length > 0 ? Math.round((wins / history.length) * 100) : 0;
   const avgAccuracy = history.length > 0 ? Math.round(history.reduce((s, m) => s + (m.accuracy || 0), 0) / history.length) : 0;
+
+  const totalEloChange = history.reduce((sum, m) => sum + (m.eloChange || 0), 0);
+  const currentRating = user?.rating ?? (parseInt(localStorage.getItem('chess7k_guest_elo')) || 1200);
 
   const memberSince = user?.createdAt ? new Date(user.createdAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : 'Guest Player';
 
@@ -95,7 +97,10 @@ const Profile = ({ user }) => {
           <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '8px' }}>{user ? user.email : 'Local Guest Account'}</div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(201,162,39,0.1)', border: '1px solid rgba(201,162,39,0.25)', borderRadius: '99px', padding: '4px 14px' }}>
-              <span style={{ fontSize: '0.85rem', color: 'var(--gold)', fontWeight: '700' }}>♚ ELO {user?.rating ?? 1200}</span>
+              <span style={{ fontSize: '0.85rem', color: 'var(--gold)', fontWeight: '700' }}>♚ ELO {currentRating}</span>
+            </div>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', background: totalEloChange >= 0 ? 'rgba(52,211,153,0.1)' : 'rgba(248,113,113,0.1)', border: `1px solid ${totalEloChange >= 0 ? 'rgba(52,211,153,0.3)' : 'rgba(248,113,113,0.3)'}`, borderRadius: '99px', padding: '4px 12px', fontSize: '0.8rem', color: totalEloChange >= 0 ? '#34d399' : '#f87171', fontWeight: '700' }}>
+              {totalEloChange >= 0 ? `+${totalEloChange}` : totalEloChange} Total ELO
             </div>
             <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', alignSelf: 'center' }}>Member since {memberSince}</span>
           </div>
@@ -210,6 +215,8 @@ const Profile = ({ user }) => {
             {history.map((match, i) => {
               const matchId = match._id || match.id || i;
               const isExpanded = expandedMatch === matchId;
+              const eloDiff = match.eloChange !== undefined ? match.eloChange : (match.result === '1-0' ? 16 : match.result === '0-1' ? -16 : 0);
+
               return (
                 <div key={matchId} className="glass-panel" style={{ padding: '14px', background: 'rgba(255,255,255,0.01)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', flexWrap: 'wrap', gap: '8px' }} onClick={() => setExpandedMatch(isExpanded ? null : matchId)}>
@@ -226,6 +233,16 @@ const Profile = ({ user }) => {
                     </div>
 
                     <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                      {/* ELO CHANGE BADGE */}
+                      <span style={{
+                        fontSize: '0.8rem', fontWeight: '700', fontFamily: 'var(--font-mono)', padding: '3px 8px', borderRadius: '4px',
+                        background: eloDiff > 0 ? 'rgba(52,211,153,0.12)' : eloDiff < 0 ? 'rgba(248,113,113,0.12)' : 'rgba(255,255,255,0.05)',
+                        color: eloDiff > 0 ? '#34d399' : eloDiff < 0 ? '#f87171' : 'var(--text-muted)',
+                        border: `1px solid ${eloDiff > 0 ? 'rgba(52,211,153,0.3)' : eloDiff < 0 ? 'rgba(248,113,113,0.3)' : 'var(--border)'}`
+                      }}>
+                        {eloDiff > 0 ? `+${eloDiff}` : eloDiff} ELO
+                      </span>
+
                       <span className={`badge ${match.result === '1-0' ? 'badge-win' : match.result === '0-1' ? 'badge-loss' : 'badge-draw'}`}>
                         {match.result === '1-0' ? '✓ Win' : match.result === '0-1' ? '✗ Loss' : '= Draw'}
                       </span>

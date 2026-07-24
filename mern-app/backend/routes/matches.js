@@ -4,10 +4,8 @@ const auth = require('../middleware/auth');
 const Match = require('../models/Match');
 const User = require('../models/User');
 
-// Helper to extract opening name from PGN or simulate one
 function getOpeningName(pgn) {
   if (!pgn) return 'Unknown Opening';
-  // Standard openings based on first moves in PGN
   if (pgn.includes('e4 e5 Nf3 Nc6 Bb5')) return 'Ruy Lopez';
   if (pgn.includes('e4 e5 Nf3 Nc6 Bc4')) return 'Italian Game';
   if (pgn.includes('e4 c5')) return 'Sicilian Defense';
@@ -29,11 +27,33 @@ router.post('/save', auth, async (req, res) => {
   const { pgn, result, accuracy, difficulty, timeControl } = req.body;
 
   try {
-    // Determine move count from PGN
+    const user = await User.findById(req.user.id);
+    const botElo = parseInt(difficulty) || 1200;
+    const playerElo = user ? user.rating : 1200;
+
+    // ELO Calculation
+    const K = 32;
+    const expectedScore = 1 / (1 + Math.pow(10, (botElo - playerElo) / 400));
+    let actualScore = 0.5;
+    if (result === '1-0') actualScore = 1.0;
+    else if (result === '0-1') actualScore = 0.0;
+    else actualScore = 0.5;
+
+    let eloChange = Math.round(K * (actualScore - expectedScore));
+    if (result === '1-0' && eloChange <= 0) eloChange = 12;
+    if (result === '0-1' && eloChange >= 0) eloChange = -12;
+    if (result === '1/2-1/2') eloChange = 0;
+
+    const newRating = Math.max(100, playerElo + eloChange);
+
+    // Save updated rating on User model
+    if (user) {
+      user.rating = newRating;
+      await user.save();
+    }
+
     const movesCount = pgn ? pgn.split(' ').filter(word => !word.includes('.')).length : 20;
-    
-    // Simulate realistic move analysis based on accuracy
-    const acc = accuracy || (Math.floor(Math.random() * 30) + 65); // 65-95%
+    const acc = accuracy || (Math.floor(Math.random() * 30) + 65);
     
     const blunderChance = Math.max(0, Math.floor((100 - acc) / 8));
     const mistakeChance = Math.max(0, Math.floor((100 - acc) / 5));
@@ -50,7 +70,7 @@ router.post('/save', auth, async (req, res) => {
     const best = Math.floor(remainingMoves * (acc / 100));
     const excellent = Math.floor((remainingMoves - best) * 0.4);
     const good = Math.max(0, remainingMoves - best - excellent);
-    const book = Math.floor(Math.random() * 6) + 2; // 2-8 book moves
+    const book = Math.floor(Math.random() * 6) + 2;
     
     const analysis = {
       brilliant,
@@ -65,15 +85,13 @@ router.post('/save', auth, async (req, res) => {
       blunder: blunders
     };
 
-    // Performance rating is roughly related to accuracy and opponent ELO
-    let performanceRating = Math.floor(difficulty * (acc / 100));
+    let performanceRating = Math.floor(botElo * (acc / 100));
     if (result === '1-0') performanceRating += 200;
     if (result === '0-1') performanceRating -= 200;
     performanceRating = Math.max(100, performanceRating);
 
     const openingName = getOpeningName(pgn);
 
-    // Phase accuracy
     const phasePerformance = {
       opening: Math.min(100, Math.floor(acc + (Math.random() * 10 - 3))),
       middlegame: Math.min(100, Math.floor(acc + (Math.random() * 12 - 7))),
@@ -85,8 +103,10 @@ router.post('/save', auth, async (req, res) => {
       pgn,
       result,
       accuracy: acc,
-      difficulty: parseInt(difficulty) || 1200,
+      difficulty: botElo,
       timeControl: timeControl || 'no limit',
+      eloChange,
+      ratingAfter: newRating,
       analysis,
       performanceRating,
       openingName,
@@ -95,35 +115,7 @@ router.post('/save', auth, async (req, res) => {
 
     const match = await newMatch.save();
 
-    // ELO Updates: starting at 0, increasing when beating opponent
-    const user = await User.findById(req.user.id);
-    let ratingChange = 0;
-
-    if (result === '1-0') {
-      // User beat bot. Rating change depends on bot ELO vs user ELO
-      const diff = (parseInt(difficulty) || 1200) - user.rating;
-      const expectedScore = 1 / (1 + Math.pow(10, -diff / 400));
-      ratingChange = Math.round(32 * (1 - expectedScore));
-      // Ensure positive change on win
-      if (ratingChange <= 0) ratingChange = 10;
-    } else if (result === '0-1') {
-      // User lost. Rating change
-      const diff = (parseInt(difficulty) || 1200) - user.rating;
-      const expectedScore = 1 / (1 + Math.pow(10, -diff / 400));
-      ratingChange = Math.round(32 * (0 - expectedScore));
-      // Ensure it's negative
-      if (ratingChange >= 0) ratingChange = -10;
-    } else {
-      // Draw
-      const diff = (parseInt(difficulty) || 1200) - user.rating;
-      const expectedScore = 1 / (1 + Math.pow(10, -diff / 400));
-      ratingChange = Math.round(32 * (0.5 - expectedScore));
-    }
-
-    user.rating = Math.max(0, user.rating + ratingChange);
-    await user.save();
-
-    res.json({ match, newRating: user.rating });
+    res.json({ match, newRating });
   } catch (err) {
     console.error(err.message);
     res.status(500).send('Server error');

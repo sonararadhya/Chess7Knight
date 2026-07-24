@@ -7,19 +7,28 @@ import { getCustomPieces } from '../utils/pieceSets';
 
 const DRILLS = {
   openings: [
-    { name: 'Italian Game', fen: 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3', moves: ['Bc5'], desc: 'Develop the bishop to c5 in the Italian Game.' },
-    { name: 'Sicilian Defense', fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', moves: ['c5'], desc: 'Play c5 to start the Sicilian Defense.' },
-    { name: "Queen's Gambit", fen: 'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 1', moves: ['d5'], desc: 'Respond with d5 to contest the center.' },
+    { name: 'Italian Game', fen: 'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3', moves: ['Bc5'], desc: 'Develop the bishop to c5 in the Italian Game.', hint: 'Move your dark-squared bishop to c5 to control the central d4 square.' },
+    { name: 'Sicilian Defense', fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', moves: ['c5'], desc: 'Play c5 to start the Sicilian Defense.', hint: 'Push your c-pawn to c5 to challenge White\'s central dominance asynchronously.' },
+    { name: "Queen's Gambit", fen: 'rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 1', moves: ['d5'], desc: 'Respond with d5 to contest the center.', hint: 'Push your d-pawn to d5 to establish immediate central presence.' },
+    { name: 'Ruy Lopez (Spanish)', fen: 'r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3', moves: ['a6'], desc: 'Play a6 to challenge White\'s b5 bishop.', hint: 'Question White\'s bishop with a6 (Morphy Defense).' },
+    { name: 'French Defense', fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', moves: ['e6'], desc: 'Play e6 to establish a solid French structure.', hint: 'Prepare d5 by advancing e6 first.' },
+    { name: 'Caro-Kann Defense', fen: 'rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1', moves: ['c6'], desc: 'Play c6 to prepare d5.', hint: 'Set up c6 to support d5 without blocking your light-squared bishop.' },
   ],
   endgames: [
-    { name: 'King + Rook Mate', fen: '4k3/8/8/8/8/8/8/R3K3 w - - 0 1', moves: ['Ra8'], desc: 'Use the rook to deliver checkmate on the back rank.' },
-    { name: 'Passed Pawn', fen: '8/8/8/4k3/8/8/4P3/4K3 w - - 0 1', moves: ['e4'], desc: 'Push the pawn forward to promote.' },
-    { name: 'Opposition', fen: '8/8/4k3/8/4K3/8/4P3/8 w - - 0 1', moves: ['e3'], desc: 'Push the pawn. The king will support it later.' },
+    { name: 'King + Rook Mate', fen: '4k3/8/8/8/8/8/8/R3K3 w - - 0 1', moves: ['Ra8'], desc: 'Use the rook to deliver checkmate on the back rank.', hint: 'Drive the enemy king to the edge and slide your rook to a8.' },
+    { name: 'Passed Pawn', fen: '8/8/8/4k3/8/8/4P3/4K3 w - - 0 1', moves: ['e4'], desc: 'Push the pawn forward to promote.', hint: 'Advance your passed pawn towards promotion with king support.' },
+    { name: 'Opposition', fen: '8/8/4k3/8/4K3/8/4P3/8 w - - 0 1', moves: ['e3'], desc: 'Push the pawn. The king will support it later.', hint: 'Advance e3 to retain key opposition squares.' },
+    { name: 'King + Queen Mate', fen: '4k3/8/8/8/8/8/4Q3/4K3 w - - 0 1', moves: ['Qe7'], desc: 'Cut off the king with your Queen.', hint: 'Trap the enemy king against the back rank with Qe7.' },
+    { name: 'Lucena Position', fen: '1R6/3k4/8/3P4/8/8/3K4/8 w - - 0 1', moves: ['Rb7'], desc: 'Check the king away to build a bridge.', hint: 'Deliver check on b7 to drive the black king to the c-file.' },
+    { name: 'Pawn Push Promotion', fen: '8/2P5/8/3k4/8/8/4K3/8 w - - 0 1', moves: ['c8=Q'], desc: 'Promote your pawn to a Queen!', hint: 'Advance the c7 pawn to c8 and promote to a Queen.' },
   ],
   tactics: [
-    { name: 'Fork the King & Rook', fen: 'r3k3/8/8/8/3N4/8/8/4K3 w - - 0 1', moves: ['Nc6'], desc: 'The knight forks the king and rook on c6.' },
-    { name: 'Back Rank Mate', fen: '6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1', moves: ['Re8'], desc: 'Deliver checkmate on the back rank.' },
-    { name: 'Pin the Knight', fen: 'r1bqkb1r/pppppppp/2n2n2/8/3PP3/8/PPP2PPP/RNBQKBNR w KQkq - 2 3', moves: ['Bb5'], desc: 'Pin the knight to the king with Bb5.' },
+    { name: 'Fork the King & Rook', fen: 'r3k3/8/8/8/3N4/8/8/4K3 w - - 0 1', moves: ['Nc6'], desc: 'The knight forks the king and rook on c6.', hint: 'Jump your knight to c6 to fork king e8 and rook a7/a8.' },
+    { name: 'Back Rank Mate', fen: '6k1/5ppp/8/8/8/8/5PPP/4R1K1 w - - 0 1', moves: ['Re8'], desc: 'Deliver checkmate on the back rank.', hint: 'Slide your rook to the 8th rank for an unblockable mate.' },
+    { name: 'Pin the Knight', fen: 'r1bqkb1r/pppppppp/2n2n2/8/3PP3/8/PPP2PPP/RNBQKBNR w KQkq - 2 3', moves: ['Bb5'], desc: 'Pin the knight to the king with Bb5.', hint: 'Develop Bb5 to freeze the c6 knight in place.' },
+    { name: 'Skewer Tactics', fen: '4k3/8/8/4q3/8/8/8/R3K3 w - - 0 1', moves: ['Ra8'], desc: 'Deliver a powerful Rook Skewer!', hint: 'Check the king on a8 and win the queen behind it.' },
+    { name: 'Discovered Attack', fen: 'r1bqk2r/pppp1ppp/2n5/4P3/1b2n3/2N2N2/PPP2PPP/R1BQKB1R w KQkq - 0 6', moves: ['Bd2'], desc: 'Neutralize the pin on c3.', hint: 'Interpose your bishop on d2 to block the check line.' },
+    { name: 'Knight Fork on c7', fen: 'r3k2r/ppp2ppp/2n5/4p3/3N4/8/PPP2PPP/R3K2R w KQkq - 0 1', moves: ['Nbc6'], desc: 'Fork the central squares!', hint: 'Move your knight into c6 to create multiple piece threats.' },
   ],
 };
 
@@ -36,6 +45,7 @@ const Practice = () => {
   const [drillIdx, setDrillIdx] = useState(0);
   const [status, setStatus] = useState('');
   const [statusType, setStatusType] = useState('info');
+  const [showHint, setShowHint] = useState(false);
   const [moveFrom, setMoveFrom] = useState(null);
   const [optionSquares, setOptionSquares] = useState({});
   const [completed, setCompleted] = useState(false);
@@ -61,6 +71,7 @@ const Practice = () => {
     setDrillIdx(idx);
     setStatus(drill.desc);
     setStatusType('info');
+    setShowHint(false);
     setCompleted(false);
     setMoveFrom(null);
     setOptionSquares({});
@@ -134,21 +145,21 @@ const Practice = () => {
 
   const catDrills = category ? DRILLS[category] : [];
 
+  // FIX REQUEST 1 & 2: Pass customPieces & theme darkSquareStyle / lightSquareStyle directly into Chessboard options
   const chessboardOptions = useMemo(() => ({
     id: 'practice-board',
     position: fen,
     onPieceDrop: ({ sourceSquare, targetSquare } = {}) => sourceSquare && targetSquare ? tryMove(sourceSquare, targetSquare) : false,
     onSquareClick: onSquareClick,
     animationDurationInMs: 200,
-    boardStyle: { borderRadius: '8px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' },
+    boardStyle: { borderRadius: '10px', boxShadow: '0 12px 40px rgba(0,0,0,0.5)' },
     squareStyles: optionSquares,
-    darkSquareStyle: { backgroundColor: theme.darkSquare },
-    lightSquareStyle: { backgroundColor: theme.lightSquare },
-    customPieces: customPieces,
+    darkSquareStyle: theme.darkSquareStyle || { backgroundColor: theme.darkSquare },
+    lightSquareStyle: theme.lightSquareStyle || { backgroundColor: theme.lightSquare },
     canDragPiece: () => !completed,
     boardOrientation: drill?.fen.includes(' b ') ? 'black' : 'white',
     showNotation: true,
-  }), [fen, tryMove, onSquareClick, optionSquares, theme, customPieces, completed, drill]);
+  }), [fen, tryMove, onSquareClick, optionSquares, theme, completed, drill]);
 
   if (!category) {
     return (
@@ -196,16 +207,24 @@ const Practice = () => {
 
         <div style={{ maxWidth: '480px', margin: '0 auto' }}>
           <Chessboard
+            customPieces={customPieces}
             options={chessboardOptions}
           />
         </div>
 
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '1.25rem', flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => setShowHint(!showHint)}>💡 {showHint ? t('hide_hint') : t('show_hint')}</button>
           <button className="btn btn-secondary btn-sm" onClick={() => startDrill(category, drillIdx)}>↺ {t('restart')}</button>
           {completed && drillIdx + 1 < catDrills.length && (
             <button className="btn btn-sm" onClick={() => startDrill(category, drillIdx + 1)}>Next Drill →</button>
           )}
         </div>
+
+        {showHint && (
+          <div className="slide-in" style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: 'rgba(79,140,255,0.06)', border: '1px solid rgba(79,140,255,0.2)', borderRadius: '8px', fontSize: '0.9rem', color: 'var(--accent)', textAlign: 'left', lineHeight: 1.5 }}>
+            <strong>💡 Hint:</strong> {drill.hint}
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: '6px', justifyContent: 'center', marginTop: '1rem', flexWrap: 'wrap' }}>
           {catDrills.map((d, i) => (

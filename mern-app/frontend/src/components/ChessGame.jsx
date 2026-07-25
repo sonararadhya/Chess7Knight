@@ -110,15 +110,29 @@ const ChessGame = ({ user }) => {
   // Custom Pieces renderer
   const customPieces = useMemo(() => getCustomPieces(pieceSetId), [pieceSetId]);
 
-  // FIX BUG 3: Handle external review launch cleanly WITHOUT popping up defeat overlay
+  // Handle closing review mode (returns to profile if came from profile review match)
+  const handleCloseReview = useCallback(() => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    setIsReviewMode(false);
+    setIsGameOverState(false);
+    setShowAnalysis(false);
+    if (location.state?.reviewMatch) {
+      navigate('/profile', { replace: true });
+    } else {
+      setGameState('menu');
+    }
+  }, [location.state, navigate]);
+
+  // Handle external review launch cleanly WITHOUT popping up defeat overlay or running timer
   useEffect(() => {
     if (location.state?.reviewMatch) {
+      if (timerRef.current) clearInterval(timerRef.current);
       const match = location.state.reviewMatch;
       setAnalysisData(match);
       setShowAnalysis(false); // CRITICAL: Reset analysis modal so defeat screen doesn't pop up!
       setIsGameOverState(false);
       
-      if (match.reviewList) {
+      if (match.reviewList && match.reviewList.length > 0) {
         setReviewHistory(match.reviewList);
         setReviewIndex(match.reviewList.length);
       } else if (match.pgn) {
@@ -296,7 +310,7 @@ const ChessGame = ({ user }) => {
   }, [location.state]);
 
   const saveStateToStorage = useCallback((customStatus) => {
-    if (gameState !== 'playing' || isGameOverState) return;
+    if (gameState !== 'playing' || isGameOverState || isReviewMode || location.state?.reviewMatch) return;
     const keys = getPersistKeys();
     localStorage.setItem(keys.state, 'playing');
     localStorage.setItem(keys.fen, gameRef.current.fen());
@@ -308,7 +322,7 @@ const ChessGame = ({ user }) => {
     localStorage.setItem(keys.statusText, customStatus || status);
     localStorage.setItem(keys.mode, gameMode);
     localStorage.setItem(keys.color, actualColor);
-  }, [gameState, selectedElo, selectedTime, playerTime, botTime, status, gameMode, actualColor, isGameOverState]);
+  }, [gameState, selectedElo, selectedTime, playerTime, botTime, status, gameMode, actualColor, isGameOverState, isReviewMode, location.state]);
 
   const clearStorageGame = () => {
     const keys = getPersistKeys();
@@ -316,10 +330,10 @@ const ChessGame = ({ user }) => {
   };
 
   useEffect(() => {
-    if (gameState === 'playing' && !isGameOverState) {
+    if (gameState === 'playing' && !isGameOverState && !isReviewMode && !location.state?.reviewMatch) {
       saveStateToStorage();
     }
-  }, [fen, playerTime, botTime, gameState, isGameOverState, saveStateToStorage]);
+  }, [fen, playerTime, botTime, gameState, isGameOverState, isReviewMode, location.state, saveStateToStorage]);
 
   useEffect(() => {
     const updateSize = () => {
@@ -332,7 +346,7 @@ const ChessGame = ({ user }) => {
 
   // Timer Tick Interval
   useEffect(() => {
-    if (gameState !== 'playing' || selectedTime.value === 0 || isThinking || gameMode === 'local' || isGameOverState) {
+    if (gameState !== 'playing' || selectedTime.value === 0 || isThinking || gameMode === 'local' || isGameOverState || isReviewMode || location.state?.reviewMatch) {
       if (timerRef.current) clearInterval(timerRef.current);
       return;
     }
@@ -361,9 +375,10 @@ const ChessGame = ({ user }) => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [gameState, selectedTime, isThinking, gameMode, actualColor, isGameOverState]);
+  }, [gameState, selectedTime, isThinking, gameMode, actualColor, isGameOverState, isReviewMode, location.state]);
 
   const handleTimeout = (result) => {
+    if (isReviewMode || location.state?.reviewMatch) return;
     if (timerRef.current) clearInterval(timerRef.current);
     setIsGameOverState(true);
     const winner = result === '1-0' ? 'White' : 'Black';
@@ -381,6 +396,7 @@ const ChessGame = ({ user }) => {
 
   // ── SAVE MATCH & CALCULATE ELO (Fixes Issue 1, Request 5) ──
   const saveMatch = async (result) => {
+    if (isReviewMode || location.state?.reviewMatch) return;
     if (timerRef.current) clearInterval(timerRef.current);
     setIsGameOverState(true);
 
@@ -464,6 +480,7 @@ const ChessGame = ({ user }) => {
   };
 
   const checkGameOver = useCallback((g) => {
+    if (isReviewMode || location.state?.reviewMatch) return false;
     if (g.isGameOver()) {
       if (timerRef.current) clearInterval(timerRef.current);
       setIsGameOverState(true);
@@ -485,7 +502,7 @@ const ChessGame = ({ user }) => {
       setStatus(t('your_turn'));
     }
     return false;
-  }, [selectedElo, selectedTime, t, gameMode]);
+  }, [selectedElo, selectedTime, t, gameMode, isReviewMode, location.state]);
 
   const makeAMove = useCallback((move) => {
     try {
@@ -817,6 +834,7 @@ const ChessGame = ({ user }) => {
   };
 
   const handleResign = () => {
+    if (isReviewMode || location.state?.reviewMatch) return;
     if (timerRef.current) clearInterval(timerRef.current);
     setIsGameOverState(true);
     setStatus('🏳️ Resignation. Match over.');
@@ -825,7 +843,7 @@ const ChessGame = ({ user }) => {
   };
 
   const handleOfferDraw = () => {
-    if (isThinking || gameRef.current.isGameOver()) return;
+    if (isReviewMode || location.state?.reviewMatch || isThinking || gameRef.current.isGameOver()) return;
     const isAccepted = Math.random() > 0.5;
     if (isAccepted) {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -842,6 +860,10 @@ const ChessGame = ({ user }) => {
   };
 
   const handleQuitOrAbandon = () => {
+    if (isReviewMode || location.state?.reviewMatch) {
+      handleCloseReview();
+      return;
+    }
     if (gameState === 'playing' && !gameRef.current.isGameOver() && !isGameOverState) {
       setShowAbandonPrompt(true);
     } else {
@@ -861,6 +883,7 @@ const ChessGame = ({ user }) => {
   };
 
   const startInteractiveReview = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
     const history = gameRef.current.history({ verbose: true });
     const fullRev = generateIndustryGameReview(history);
     setReviewHistory(fullRev.reviewList);
@@ -871,7 +894,7 @@ const ChessGame = ({ user }) => {
 
   // Bot Turn Trigger Effect
   useEffect(() => {
-    if (gameState === 'playing' && gameMode === 'bot' && !isThinking && !gameRef.current.isGameOver() && !isGameOverState) {
+    if (gameState === 'playing' && gameMode === 'bot' && !isThinking && !gameRef.current.isGameOver() && !isGameOverState && !isReviewMode && !location.state?.reviewMatch) {
       const turn = gameRef.current.turn();
       const botColorChar = actualColor === 'white' ? 'b' : 'w';
       if (turn === botColorChar) {
@@ -879,17 +902,17 @@ const ChessGame = ({ user }) => {
         return () => clearTimeout(timer);
       }
     }
-  }, [fen, gameState, gameMode, isThinking, actualColor, makeBotMove, isGameOverState]);
+  }, [fen, gameState, gameMode, isThinking, actualColor, makeBotMove, isGameOverState, isReviewMode, location.state]);
 
   useEffect(() => {
-    if (gameState === 'playing' && gameMode === 'bot' && actualColor === 'black' && !isThinking && !isGameOverState) {
+    if (gameState === 'playing' && gameMode === 'bot' && actualColor === 'black' && !isThinking && !isGameOverState && !isReviewMode && !location.state?.reviewMatch) {
       const turn = gameRef.current.turn();
       if (turn === 'w') {
         const timer = setTimeout(makeBotMove, 600);
         return () => clearTimeout(timer);
       }
     }
-  }, [gameState, actualColor, gameMode]);
+  }, [gameState, actualColor, gameMode, isThinking, isGameOverState, isReviewMode, makeBotMove, location.state]);
 
   // ── MENU VIEW ──
   if (gameState === 'menu') {
@@ -1162,7 +1185,7 @@ const ChessGame = ({ user }) => {
         {isReviewMode ? (
           <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: '440px', gap: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => setIsReviewMode(false)}>
+              <button className="btn btn-secondary btn-sm" onClick={handleCloseReview}>
                 ← Close Review
               </button>
               <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--gold)' }}>
@@ -1294,7 +1317,7 @@ const ChessGame = ({ user }) => {
             </div>
 
             <div style={{ marginTop: 'auto', display: 'flex', gap: '6px' }}>
-              <button className="btn btn-gold btn-sm" style={{ flex: 1 }} onClick={() => { setIsReviewMode(false); setGameState('menu'); setIsGameOverState(false); }}>
+              <button className="btn btn-gold btn-sm" style={{ flex: 1 }} onClick={handleCloseReview}>
                 🏠 Main Menu
               </button>
             </div>

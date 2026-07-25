@@ -19,6 +19,54 @@ export const themes = {
     darkSquareStyle: { background: 'radial-gradient(circle, #b58863 0%, #8c5a32 100%)', boxShadow: 'inset 0 0 8px rgba(0,0,0,0.35)', border: '1px solid rgba(110,65,30,0.2)' },
     lightSquareStyle: { background: 'radial-gradient(circle, #f0d9b5 0%, #d8be97 100%)', boxShadow: 'inset 0 0 4px rgba(0,0,0,0.1)' }
   },
+  oceanIce: {
+    name: 'Ocean Ice Marble',
+    darkSquare: '#0f4c81',
+    lightSquare: '#c5ebf8',
+    accentColor: '#38bdf8',
+    darkSquareStyle: { background: 'radial-gradient(ellipse at center, #1b5e9a 0%, #0a355c 70%, #052340 100%)', boxShadow: 'inset 0 0 10px rgba(0,0,0,0.4)', border: '1px solid rgba(56,189,248,0.25)' },
+    lightSquareStyle: { background: 'radial-gradient(ellipse at center, #e4f7fd 0%, #a2def3 70%, #7bcde9 100%)', boxShadow: 'inset 0 0 6px rgba(255,255,255,0.6)' }
+  },
+  walnutBurl: {
+    name: 'Walnut Burl Wood',
+    darkSquare: '#5c3317',
+    lightSquare: '#e3c8a0',
+    accentColor: '#f59e0b',
+    darkSquareStyle: { background: 'radial-gradient(circle at 30% 30%, #7a4623 0%, #4a2610 70%, #2e1406 100%)', boxShadow: 'inset 0 0 12px rgba(0,0,0,0.5)', border: '1px solid rgba(92,51,23,0.4)' },
+    lightSquareStyle: { background: 'radial-gradient(circle at 70% 70%, #f4e3c9 0%, #d8b888 70%, #be9b68 100%)', boxShadow: 'inset 0 0 6px rgba(0,0,0,0.1)' }
+  },
+  slateGranite: {
+    name: 'Slate Charcoal Granite',
+    darkSquare: '#2c3036',
+    lightSquare: '#aeb4bc',
+    accentColor: '#94a3b8',
+    darkSquareStyle: { background: 'linear-gradient(135deg, #3d434d 0%, #23272d 60%, #15171b 100%)', boxShadow: 'inset 0 0 10px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)' },
+    lightSquareStyle: { background: 'linear-gradient(135deg, #cdd3db 0%, #9fa6b1 60%, #858d99 100%)', boxShadow: 'inset 0 0 6px rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.2)' }
+  },
+  diamondGlass: {
+    name: 'Diamond Glass Glitter',
+    darkSquare: '#7a889b',
+    lightSquare: '#dcebf5',
+    accentColor: '#e0f2fe',
+    darkSquareStyle: { background: 'linear-gradient(135deg, #8b99ac 0%, #5f6e80 50%, #485566 100%)', boxShadow: 'inset 0 0 12px rgba(255,255,255,0.25)', border: '1px solid rgba(255,255,255,0.3)' },
+    lightSquareStyle: { background: 'linear-gradient(135deg, #f0f7fc 0%, #cce2f0 50%, #b3d4e8 100%)', boxShadow: 'inset 0 0 8px rgba(255,255,255,0.8)', border: '1px solid rgba(255,255,255,0.5)' }
+  },
+  naturalOak: {
+    name: 'Natural Oak Grain',
+    darkSquare: '#784c28',
+    lightSquare: '#d2af7d',
+    accentColor: '#d97706',
+    darkSquareStyle: { background: 'linear-gradient(180deg, #8a5830 0%, #643d1c 100%)', boxShadow: 'inset 0 0 8px rgba(0,0,0,0.3)', border: '1px solid rgba(80,45,18,0.3)' },
+    lightSquareStyle: { background: 'linear-gradient(180deg, #dfc091 0%, #c49e69 100%)', boxShadow: 'inset 0 0 4px rgba(0,0,0,0.1)' }
+  },
+  caramelPine: {
+    name: 'Caramel Pine Vector',
+    darkSquare: '#d5944b',
+    lightSquare: '#f3e2bf',
+    accentColor: '#f59e0b',
+    darkSquareStyle: { background: 'linear-gradient(135deg, #e5a45b 0%, #c78336 100%)', boxShadow: 'inset 0 0 6px rgba(0,0,0,0.2)', border: '1px solid rgba(180,110,30,0.3)' },
+    lightSquareStyle: { background: 'linear-gradient(135deg, #faebd0 0%, #e6d3ab 100%)', boxShadow: 'inset 0 0 4px rgba(255,255,255,0.4)' }
+  },
   cyberpunk: {
     name: 'Cyberpunk Neon',
     darkSquare: '#260a4c',

@@ -145,10 +145,11 @@ const Practice = () => {
 
   const catDrills = category ? DRILLS[category] : [];
 
-  // FIX REQUEST 1 & 2: Pass customPieces & theme darkSquareStyle / lightSquareStyle directly into Chessboard options
+  // Pass customPieces as 'pieces' prop & theme darkSquareStyle / lightSquareStyle directly into Chessboard options
   const chessboardOptions = useMemo(() => ({
     id: 'practice-board',
     position: fen,
+    pieces: customPieces,
     onPieceDrop: ({ sourceSquare, targetSquare } = {}) => sourceSquare && targetSquare ? tryMove(sourceSquare, targetSquare) : false,
     onSquareClick: onSquareClick,
     animationDurationInMs: 200,
@@ -159,7 +160,7 @@ const Practice = () => {
     canDragPiece: () => !completed,
     boardOrientation: drill?.fen.includes(' b ') ? 'black' : 'white',
     showNotation: true,
-  }), [fen, tryMove, onSquareClick, optionSquares, theme, completed, drill]);
+  }), [fen, tryMove, onSquareClick, optionSquares, theme, completed, drill, customPieces]);
 
   if (!category) {
     return (
@@ -206,10 +207,7 @@ const Practice = () => {
         <div className="status-bar" style={{ marginBottom: '1rem', ...statusStyle }}>{status}</div>
 
         <div style={{ maxWidth: '480px', margin: '0 auto' }}>
-          <Chessboard
-            customPieces={customPieces}
-            options={chessboardOptions}
-          />
+          <Chessboard options={chessboardOptions} />
         </div>
 
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '1.25rem', flexWrap: 'wrap' }}>

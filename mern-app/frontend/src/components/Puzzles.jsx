@@ -147,10 +147,11 @@ const Puzzles = () => {
     return tryMove(sourceSquare, targetSquare);
   }, [tryMove]);
 
-  // FIX REQUEST 1 & 2: Pass customPieces & theme darkSquareStyle / lightSquareStyle directly into Chessboard options
+  // Pass customPieces as 'pieces' prop & theme darkSquareStyle / lightSquareStyle directly into Chessboard options
   const chessboardOptions = useMemo(() => ({
     id: 'puzzle-board',
     position: fen,
+    pieces: customPieces,
     onPieceDrop: onDrop,
     onSquareClick: onSquareClick,
     animationDurationInMs: 200,
@@ -161,7 +162,7 @@ const Puzzles = () => {
     canDragPiece: () => !completed,
     boardOrientation: puzzle.fen.includes(' b ') ? 'black' : 'white',
     showNotation: true,
-  }), [fen, onDrop, onSquareClick, optionSquares, theme, completed, puzzle]);
+  }), [fen, onDrop, onSquareClick, optionSquares, theme, completed, puzzle, customPieces]);
 
   const statusStyle = {
     info: { borderColor: 'var(--accent)', color: 'var(--accent)' },
@@ -200,10 +201,7 @@ const Puzzles = () => {
         <div className="status-bar" style={{ marginBottom: '1rem', ...statusStyle }}>{status}</div>
 
         <div style={{ maxWidth: '500px', margin: '0 auto' }}>
-          <Chessboard
-            customPieces={customPieces}
-            options={chessboardOptions}
-          />
+          <Chessboard options={chessboardOptions} />
         </div>
 
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '1.25rem', flexWrap: 'wrap' }}>

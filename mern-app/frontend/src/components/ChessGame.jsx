@@ -725,13 +725,14 @@ const ChessGame = ({ user }) => {
     setCurrentMoveIndex(index);
   }, [pastFens.length]);
 
-  // FIX REQUEST 1 & 2: Pass customPieces & theme darkSquareStyle / lightSquareStyle directly into Chessboard options
+  // Pass customPieces as 'pieces' prop & theme darkSquareStyle / lightSquareStyle directly into Chessboard options
   const chessboardOptions = useMemo(() => {
     return {
       id: 'game-board',
       position: isReviewMode 
         ? (reviewIndex === 0 ? 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1' : (reviewHistory[reviewIndex - 1]?.fenAfter || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1')) 
         : pastFens[currentMoveIndex],
+      pieces: customPieces,
       onPieceDrop: onPieceDrop,
       onSquareClick: onSquareClick,
       animationDurationInMs: 220,
@@ -757,6 +758,7 @@ const ChessGame = ({ user }) => {
     reviewHistory,
     pastFens,
     currentMoveIndex,
+    customPieces,
     onPieceDrop,
     onSquareClick,
     getReviewSquareStyles,
@@ -1067,9 +1069,9 @@ const ChessGame = ({ user }) => {
           )}
         </div>
 
-        {/* FIX REQUEST 1: Pass customPieces directly as prop to Chessboard */}
+        {/* Pass customPieces inside options to Chessboard */}
         <div className="board-wrapper">
-          <Chessboard customPieces={customPieces} options={chessboardOptions} />
+          <Chessboard options={chessboardOptions} />
           
           {promotionPending && (
             <div style={{

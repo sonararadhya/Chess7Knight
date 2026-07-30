@@ -1,6 +1,6 @@
 # ♞ Chess7Knight: A Comprehensive Chess Ecosystem
 
-Welcome to **Chess7Knight**, an all-encompassing chess gaming and educational platform. This project consists of two distinct applications: a fully-featured local desktop application and a modern full-stack web application.
+Welcome to **Chess7Knight**, a holistic chess gaming and educational platform. This project encompasses two distinct applications: a fully-featured local desktop application and a modern full-stack web application.
 
 ---
 
@@ -24,7 +24,7 @@ Chess7Knight/
 ## 🚀 Applications Overview
 
 ### 1. 🖥️ Desktop Application (`python-app`)
-A responsive, high-performance offline chess client designed for local gameplay and analytics.
+A responsive and high-performance offline chess client designed for local gameplay and analytics.
 * **Technology Stack**: Python 3.9+, Pygame, `python-chess`, Stockfish Engine.
 * **Key Features**:
   * **11 Calibrated AI Levels**: Compete against Stockfish, ranging from ELO 400 (Beginner) to 1950 (Grandmaster).
@@ -39,7 +39,7 @@ A responsive, high-performance offline chess client designed for local gameplay 
 ---
 
 ### 2. 🌐 MERN Web Application (`mern-app`)
-A modern, responsive full-stack web portal for playing chess, completing drills, solving puzzles, and reviewing match statistics.
+A modern and responsive full-stack web portal for playing chess, completing drills, solving puzzles, and reviewing match statistics.
 * **Technology Stack**:
   * **Frontend**: React (Vite), `react-chessboard`, `chess.js`, Axios, React Router, Custom CSS (Glassmorphism & animated backgrounds).
   * **Backend**: Node.js, Express, MongoDB (Mongoose), JWT Authentication, Bcrypt.
